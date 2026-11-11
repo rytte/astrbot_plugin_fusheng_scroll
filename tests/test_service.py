@@ -107,7 +107,13 @@ async def test_visibility_and_no_claiming(created):
     own = await run(env, "list", {"limit": 1})
     assert own["data"]["total"] == 1
     assert own["data"]["items"][0]["persona_id"] == "alice"
-    assert (await run(env, "list", {}, actor=env.admin))["data"]["total"] == 2
+    # Current core persists its built-in default persona during initialization.
+    visible = (await run(env, "list", {}, actor=env.admin))["data"]
+    assert {p["persona_id"] for p in visible["items"]} == {
+        "alice",
+        "external",
+        "default",
+    }
     for action in ("get", "update", "delete", "switch"):
         payload = {"persona_id": "external"}
         if action == "update":

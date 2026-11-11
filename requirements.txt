@@ -1,1 +1,4 @@
 markdown-it-py>=4.0,<5
+aiohttp>=3.11.18,<4
+pillow>=11.2.1,<14
+yarl>=1.17,<2

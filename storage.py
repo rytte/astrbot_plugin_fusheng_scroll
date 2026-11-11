@@ -23,6 +23,7 @@ class Storage:
                 "已初始化的权限数据库缺失或标记损坏，拒绝重建空权限库。",
             )
         self.connection = sqlite3.connect(path, timeout=5)
+        self.path = path
         self.connection.row_factory = sqlite3.Row
         try:
             self.connection.execute("PRAGMA foreign_keys = ON")
@@ -56,10 +57,74 @@ class Storage:
                     PRAGMA user_version = 1;
                     COMMIT;
                 """)
-            elif version != 1:
+            elif version not in (1, 2, 3, 4, 5):
                 raise StudioError(
                     "storage_error", "不支持的权限数据库版本，不进行兼容迁移。"
                 )
+            if version in (0, 1):
+                self.connection.executescript("""
+                    BEGIN;
+                    CREATE TABLE cards (
+                        card_id TEXT PRIMARY KEY, document TEXT NOT NULL,
+                        owner TEXT NOT NULL, options TEXT NOT NULL,
+                        asset_id TEXT, persona_id TEXT UNIQUE, persona_ref TEXT,
+                        baseline TEXT, sync_status TEXT NOT NULL,
+                        sync_error TEXT, revision INTEGER NOT NULL DEFAULT 1,
+                        locked INTEGER NOT NULL DEFAULT 0,
+                        deleted INTEGER NOT NULL DEFAULT 0,
+                        created_at REAL NOT NULL, updated_at REAL NOT NULL
+                    );
+                    CREATE TABLE card_snapshots (
+                        snapshot_id TEXT PRIMARY KEY,
+                        card_id TEXT NOT NULL REFERENCES cards(card_id),
+                        character_version TEXT NOT NULL, created_at REAL NOT NULL,
+                        reason TEXT NOT NULL, snapshot TEXT NOT NULL,
+                        checksum TEXT NOT NULL
+                    );
+                    CREATE INDEX card_snapshots_card ON card_snapshots(card_id, created_at);
+                    CREATE TABLE card_imports (
+                        import_id TEXT PRIMARY KEY, owner TEXT NOT NULL,
+                        document TEXT NOT NULL, asset_id TEXT,
+                        created_at REAL NOT NULL, card_id TEXT
+                    );
+                    PRAGMA user_version = 2;
+                    COMMIT;
+                """)
+            if version in (0, 1, 2):
+                self.connection.executescript("""
+                    BEGIN;
+                    CREATE TABLE card_persona_sources (
+                        persona_id TEXT NOT NULL, persona_ref TEXT NOT NULL,
+                        card_id TEXT NOT NULL REFERENCES cards(card_id),
+                        PRIMARY KEY (persona_id, persona_ref)
+                    );
+                    INSERT INTO card_persona_sources
+                        SELECT persona_id, persona_ref, card_id FROM cards
+                        WHERE persona_id IS NOT NULL AND persona_ref IS NOT NULL;
+                    PRAGMA user_version = 3;
+                    COMMIT;
+                """)
+            if version in (0, 1, 2, 3):
+                self.connection.executescript("""
+                    BEGIN;
+                    CREATE TABLE card_asset_cache (
+                        cache_key TEXT PRIMARY KEY, asset_id TEXT NOT NULL,
+                        media_type TEXT NOT NULL
+                    );
+                    PRAGMA user_version = 4;
+                    COMMIT;
+                """)
+            if version in (0, 1, 2, 3, 4):
+                self.connection.executescript("""
+                    BEGIN;
+                    CREATE TABLE card_image_uploads (
+                        upload_id TEXT PRIMARY KEY, owner TEXT NOT NULL,
+                        asset_id TEXT NOT NULL, kind TEXT NOT NULL,
+                        created_at REAL NOT NULL
+                    );
+                    PRAGMA user_version = 5;
+                    COMMIT;
+                """)
             if self.connection.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
                 raise StudioError("storage_error", "权限数据库完整性检查失败。")
             self.records()

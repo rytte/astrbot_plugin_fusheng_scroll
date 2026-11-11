@@ -56,12 +56,14 @@
   "backup_keep_count": {
     "description": "每条人格版本链最多保留备份数",
     "type": "int",
-    "default": 50
+    "default": 50,
+    "hint": " 仅用于旧版普通人格备份；角色卡定版快照长期保留，不受此配置影响。"
   },
   "backup_keep_days": {
     "description": "备份保留天数",
     "type": "int",
-    "default": 90
+    "default": 90,
+    "hint": " 仅用于旧版普通人格备份；角色卡定版快照长期保留，不受此配置影响。"
   },
   "render_width": {
     "description": "详情图片宽度",

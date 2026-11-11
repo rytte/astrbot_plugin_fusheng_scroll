@@ -1,6 +1,6 @@
 name: astrbot_plugin_persona_studio
 display_name: 人格工坊
-desc: 通过模型管理人格，包括创建、编辑、切换人格等，支持版本管理，支持白名单、人格锁定和图片展示。
-version: 0.1.0
+desc: 支持 Character Card V3、V2 导入兼容、角色卡管理页面、角色版本快照与 AstrBot 人格同步，保留人格管理、白名单和锁定。
+version: 0.2.0
 author: rytte
-astrbot_version: ">=4.27,<5"
+astrbot_version: ">=4.29.3,<5"

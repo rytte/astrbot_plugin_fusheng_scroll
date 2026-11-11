@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from astrbot.api.platform import MessageType
-from astrbot.core.pipeline.waking_check.stage import build_unique_session_id
+from astrbot.core.event_bus import UNIQUE_SESSION_ID_BUILDERS
 from astrbot.core.star.filter.command import CommandFilter
 from astrbot_plugin_persona_studio.domain import Settings, StudioError
 from astrbot_plugin_persona_studio.main import PersonaStudioPlugin
@@ -163,11 +163,13 @@ async def test_group_switch_respects_core_current_session(group_env, isolated):
     env = group_env
     env.event.platform_meta.name = "aiocqhttp"
     if isolated:
-        env.event.session_id = build_unique_session_id(env.event)
+        env.event.session_id = UNIQUE_SESSION_ID_BUILDERS["aiocqhttp"](env.event)
     member = env.native_event("other", group=True)
     member.platform_meta.name = "aiocqhttp"
     member.message_obj.group_id = "test-group"
-    member.session_id = build_unique_session_id(member) if isolated else "test-group"
+    member.session_id = (
+        UNIQUE_SESSION_ID_BUILDERS["aiocqhttp"](member) if isolated else "test-group"
+    )
     manager = env.context.conversation_manager
     history = [{"role": "user", "content": "group history"}]
     current_id = await manager.new_conversation(

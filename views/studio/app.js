@@ -1,0 +1,336 @@
+const bridge = window.AstrBotPluginView || window.AstrBotPluginPage;
+const $ = (selector) => document.querySelector(selector);
+const clone = (value) => JSON.parse(JSON.stringify(value));
+const escape = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'}[char]));
+const state = {items:[], current:null, document:null, options:null, tab:'character', busy:false, raw:null, showKeys:false, avatar:null, avatarWarning:null, cardImage:null, cardImageWarning:null, pendingImages:{}, deleted:false};
+const tabs = {character:'角色设定', dialogue:'对话与指令', images:'图片与头像', astrbot:'AstrBot', history:'版本历史', source:'原始数据'};
+const statusNames = {synced:'已同步', unbound:'未绑定', pending:'待同步', failed:'同步失败', conflict:'同步冲突', missing:'人格缺失'};
+const date = (value) => value ? new Date(value * 1000).toLocaleString() : '—';
+
+function notice(message, error=false) { const el=$('#notice'); el.hidden=!message; el.textContent=message; el.dataset.error=String(error); }
+function dirty() { return !!state.current && (Object.keys(state.pendingImages).length>0 || state.raw !== null || JSON.stringify(state.document)!==JSON.stringify(state.current.document) || JSON.stringify(state.options)!==JSON.stringify(state.current.options)); }
+function draftDocument() { try { return state.raw === null ? state.document : JSON.parse(state.raw); } catch { return state.document; } }
+function versionChanged() { return !!state.current && draftDocument()?.data?.character_version!==state.current.document.data.character_version; }
+function field(label, key, value, {area=false, hint='', scope='data', rows=3, readonly=false}={}) {
+  const attr=`data-scope="${scope}" data-field="${escape(key)}" ${readonly?'readonly':''}`;
+  return `<label class="field"><span class="field-label">${label}<code>${escape(key)}</code></span>${area?`<textarea ${attr} rows="${rows}">${escape(value)}</textarea>`:`<input ${attr} value="${escape(value)}">`}${hint?`<span class="field-help">${hint}</span>`:''}</label>`;
+}
+function modal(title, body) { $('#dialog-title').textContent=title; $('#dialog-body').innerHTML=body; $('#dialog').showModal(); }
+function closeModal() { $('#dialog').close(); }
+async function confirmAction(message) {
+  $('#confirm-text').textContent=message;
+  document.querySelectorAll('[data-confirm]').forEach(el=>el.disabled=false);
+  const dialog=$('#confirm-dialog');dialog.returnValue='';dialog.showModal();
+  return new Promise(resolve=>dialog.addEventListener('close',()=>resolve(dialog.returnValue==='confirm'),{once:true}));
+}
+async function requireClean() { return !dirty() || await confirmAction('当前编辑尚未保存，放弃这些修改并继续？'); }
+async function busy(work) {
+  if(state.busy) return;
+  state.busy=true;
+  document.querySelectorAll('button,input,textarea,select').forEach(b=>{b.dataset.wasDisabled=String(b.disabled);b.disabled=true;});
+  try { return await work(); }
+  catch(error) { notice(error.message || String(error), true); }
+  finally { state.busy=false; document.querySelectorAll('button,input,textarea,select').forEach(b=>{b.disabled=b.dataset.wasDisabled==='true';delete b.dataset.wasDisabled;}); applyDisabled(); updateSavebar(); }
+}
+const get=(path,params={})=>bridge.apiGet(path,params);
+const post=(action,payload)=>bridge.apiPost('action',{action,payload});
+
+async function loadList() {
+  const items=[];
+  let offset=0;
+  while(true) {
+    const page=await get('cards',{offset,limit:100,deleted:String(state.deleted)});
+    if(offset===0){const errors=page.conversion_errors||[];const el=$('#conversion-notice');el.hidden=!errors.length;el.textContent=errors.map(e=>`「${e.persona_id}」未能转为角色卡：${e.message}`).join('；');}
+    items.push(...page.items); offset+=page.items.length;
+    if(offset>=page.total || !page.items.length) break;
+  }
+  state.items=items; renderLibrary();
+}
+function renderLibrary() {
+  const query=$('#search').value.trim().toLowerCase();
+  const visible=state.items.filter(c=>c.name.toLowerCase().includes(query));
+  $('#card-list').innerHTML=visible.map(c=>`<button class="card-item" data-card="${escape(c.card_id)}" aria-pressed="${c.card_id===state.current?.card_id}"><span class="avatar-mini" aria-hidden="true">${escape(c.name.slice(0,1))}</span><span><span class="item-name">${escape(c.name)}</span><small>V3 · ${escape(c.character_version||'未定版')}${c.persona_import?' · 来自 AstrBot':''}${c.locked?' · 已锁定':''}${['conflict','failed','missing'].includes(c.sync_status)?` · ${statusNames[c.sync_status]}`:''}</small></span></button>`).join('') || '<p class="empty muted small">暂无角色卡</p>';
+}
+async function openCard(id) {
+  const card=await get('card',{card_id:id});
+  adopt(card); render();
+}
+async function loadAvatar(card) {
+  try {
+    const result=await get('avatar',{card_id:card.card_id});
+    if(state.current!==card || result.revision!==card.revision)return;
+    state.avatar=/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(result.data_url||'')?result.data_url:null;
+    state.avatarWarning=result.warning||null;
+  } catch(error) {
+    if(state.current!==card)return;
+    state.avatarWarning=error.message||'主头像暂时无法读取，请刷新重试。';
+  }
+  renderIdentity();
+  if(state.tab==='images')renderImagePanel();
+}
+async function loadCardImage(card) {
+  if(!card.asset_id)return;
+  try {
+    const result=await get('card-image',{card_id:card.card_id});
+    if(state.current!==card || result.revision!==card.revision)return;
+    state.cardImage=validImageUrl(result.data_url)?result.data_url:null;
+    state.cardImageWarning=result.warning||null;
+  } catch(error) {
+    if(state.current!==card)return;
+    state.cardImageWarning=error.message||'角色卡图片暂时无法读取，请刷新重试。';
+  }
+  renderIdentity();
+  if(state.tab==='images')renderImagePanel();
+}
+function validImageUrl(url) { return /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(url||''); }
+function followsCardImage() {
+  if(state.pendingImages.avatar)return state.pendingImages.avatar.upload_id==='ccdefault';
+  const assets=draftDocument()?.data?.assets;
+  if(assets===undefined)return true;
+  if(!Array.isArray(assets))return false;
+  const icons=assets.filter(a=>a?.type==='icon');
+  const main=icons.find(a=>a.name==='main')||(icons.length===1?icons[0]:null);
+  return typeof main?.uri==='string' && main.uri.toLowerCase()==='ccdefault:';
+}
+function cardImageUrl() { return state.pendingImages.card_image?.data_url||state.cardImage; }
+function avatarUrl() {
+  const selected=state.pendingImages.avatar;
+  if(selected && selected.upload_id!=='ccdefault')return selected.data_url;
+  if(followsCardImage() && (selected || state.pendingImages.card_image))return cardImageUrl();
+  return state.avatar;
+}
+function avatarWarning() { return state.pendingImages.avatar || (state.pendingImages.card_image && followsCardImage())?null:state.avatarWarning; }
+function adopt(card) {
+  state.current=card; state.document=clone(card.document); state.options=clone(card.options); state.raw=null; state.avatar=null; state.avatarWarning=null; state.cardImage=null; state.cardImageWarning=null; state.pendingImages={};
+  void loadAvatar(card);
+  void loadCardImage(card);
+  const index=state.items.findIndex(c=>c.card_id===card.card_id);
+  if(index>=0) Object.assign(state.items[index],{name:card.document.data.name,character_version:card.document.data.character_version,spec:card.document.spec,revision:card.revision,locked:card.locked,deleted:card.deleted,sync_status:card.sync.status,persona_import:card.compiled.persona_import});
+}
+function renderIdentity() {
+  if(!state.current || !$('#identity')) return;
+  const d=state.document.data, image=avatarUrl(), warning=avatarWarning();
+  $('#identity').innerHTML=`<div class="avatar">${image?`<img src="${image}" alt="${escape(d.name)}的角色图">`:escape(d.name.slice(0,1))}</div><div class="identity-main"><h2>${escape(d.name)}</h2><div class="small"><span class="tag">V3</span>${state.current.compiled.persona_import?'<span class="tag">来自 AstrBot 人格</span>':''}<span class="muted">角色版本 ${escape(d.character_version||'未设置')}</span>${state.current.locked?'<span class="warning">已锁定</span>':state.current.sync.core_locked?'<span class="warning">人格已锁定</span>':''}${state.current.deleted?'<span class="warning">已归档</span>':''}<span id="dirty-label" class="warning"></span></div>${warning?`<p class="small warning">主头像：${escape(warning)}</p>`:''}</div><button data-action="export">导出</button>`;
+  $('#dirty-label').textContent=dirty()?'未保存':'';
+}
+function render() {
+  renderLibrary();
+  $('#studio').classList.toggle('show-keys',state.showKeys);
+  if(!state.current){$('#editor').innerHTML='<p class="empty muted">选择角色卡，或导入已有的 JSON / PNG。</p>';$('#preview').hidden=true;return;}
+  $('#editor').innerHTML=`<div class="identity" id="identity"></div><div class="tabs" role="tablist" aria-label="角色编辑分区">${Object.entries(tabs).map(([key,label])=>`<button role="tab" aria-selected="${state.tab===key}" aria-controls="panel" id="tab-${key}" data-tab="${key}">${label}</button>`).join('')}</div><div id="panel" role="tabpanel" aria-labelledby="tab-${state.tab}"></div><div class="savebar"><div><div id="save-state"></div><p id="save-help" class="small muted"></p></div><button class="primary" data-action="save" id="save">保存并同步</button></div>`;
+  renderIdentity(); renderPanel(); renderPreview(); updateSavebar();
+}
+function applyDisabled() {
+  if(!state.current)return;
+  const blocked=state.current.locked || state.current.deleted || state.current.sync.core_locked;
+  if(blocked)document.querySelectorAll('#panel input,#panel textarea,#panel select').forEach(el=>el.disabled=true);
+  document.querySelectorAll('[data-add-greeting],[data-remove-greeting],[data-action=archive],[data-action=bind],[data-action=unbind],[data-action=sync],[data-action=overwrite],[data-image-upload],[data-image-discard],[data-action=avatar-follow]').forEach(el=>el.disabled=state.busy || blocked);
+  document.querySelectorAll('[data-action=restore]').forEach(el=>el.disabled=state.busy || !!state.current.locked || !!state.current.sync.core_locked);
+  document.querySelectorAll('[data-action=lock]').forEach(el=>el.disabled=state.busy || !!state.current.deleted);
+}
+function renderPanel() {
+  const d=state.document.data, c=state.current;
+  const hint='<label class="key-toggle"><input type="checkbox" id="show-keys" '+(state.showKeys?'checked':'')+'>显示原始字段名</label>';
+  if(state.tab==='character') $('#panel').innerHTML=`<div class="form"><div class="row">${hint}</div><div class="two-columns">${field('角色名称','name',d.name)}${field('角色版本','character_version',d.character_version,{hint:'角色内容的自定义版本，如 1.0；更改后保存会生成完整快照'})}</div>${field('角色描述','description',d.description,{area:true})}${field('性格','personality',d.personality,{area:true})}${field('场景','scenario',d.scenario,{area:true})}<div class="two-columns">${field('作者','creator',d.creator)}${field('标签','tags',d.tags.join('、'),{scope:'tags',hint:'使用顿号或逗号分隔'})}</div>${field('创作者备注','creator_notes',d.creator_notes,{area:true,hint:'用于管理和导出，默认不进入模型上下文'})}</div>`;
+  if(state.tab==='dialogue') $('#panel').innerHTML=`<div class="form">${field('角色指令','system_prompt',d.system_prompt,{area:true,hint:c.compiled.persona_import?'从 AstrBot 转入的原提示词原样保留；编辑后支持角色卡文本宏':'为空时使用默认角色指令；支持 {{char}}、{{user}} 和 {{original}}'})}${field('历史后指令','post_history_instructions',d.post_history_instructions,{area:true,hint:'作为本轮临时补充内容附在用户消息后，不修改已存历史'})}${field('示例对话','mes_example',d.mes_example,{area:true,rows:6,hint:c.compiled.persona_import?'原预设对话未编辑时按 AstrBot 原方式运行；编辑后使用角色卡示例格式':'支持 <START>、{{user}}: 和 {{char}}:；无法解析的格式保留为提示词原文'})}${field('开场白','first_mes',d.first_mes,{area:true,hint:'新对话的角色背景消息，不会重复写入聊天历史'})}${greetings('alternate_greetings','备用开场白')}${greetings('group_only_greetings','群聊开场白')}<label class="field"><span class="field-label">默认开场白</span><select data-scope="options-number" data-field="greeting_index">${[d.first_mes,...d.alternate_greetings].map((v,i)=>`<option value="${i}" ${state.options.greeting_index===i?'selected':''}>${i===0?'主开场白':`备用 ${i}`} · ${escape(v.slice(0,25)||'空白')}</option>`).join('')}</select><span class="field-help">有群聊专用开场白时使用群聊列表中的同一序号；超出序号时不注入。</span></label></div>`;
+  if(state.tab==='images') renderImagePanel();
+  if(state.tab==='astrbot') renderAstrbot();
+  if(state.tab==='history') $('#panel').innerHTML=`<p class="small muted">初始保存和角色版本变更时留档，长期保留。恢复不会产生额外快照。</p>${c.snapshots.map(s=>`<article class="snapshot"><div class="row"><h3>版本 ${escape(s.character_version||'未设置')}</h3><span class="small muted">${date(s.created_at)}</span></div><p>${({create:'初始创建',import:'初始导入',persona:'从 AstrBot 人格转换',version:'角色版本变更'})[s.reason]||escape(s.reason)}</p><div class="actions"><button data-snapshot="${escape(s.snapshot_id)}">查看与比较</button></div></article>`).join('')}`;
+  if(state.tab==='source') $('#panel').innerHTML=`<div class="form"><div class="notice">世界书、未知字段和扩展原样保存；本版不执行世界书引擎或酒馆扩展脚本。</div><label class="field"><span class="field-label">完整角色卡 JSON</span><textarea class="raw-editor" id="raw-json" spellcheck="false">${escape(state.raw??JSON.stringify(state.document,null,2))}</textarea><span class="field-help">此处编辑完整文档；保存时校验并统一为 V3。它不会修改绑定或权限信息。assets 中的 icon/main 可指定主头像；“图片与头像”中待保存的选择会在保存时应用。</span></label><div class="details-row"><span>卡片创建</span><span>${date(c.created_at)}</span></div><div class="details-row"><span>卡片最近保存</span><span>${date(c.updated_at)}</span></div>${d.creation_date?`<div class="details-row"><span>作者创建日期</span><span>${date(d.creation_date)}</span></div>`:''}${d.modification_date?`<div class="details-row"><span>作者修改日期</span><span>${date(d.modification_date)}</span></div>`:''}</div>`;
+  if(c.locked || c.deleted || c.sync.core_locked) $('#panel').querySelectorAll('input,textarea,select').forEach(el=>el.disabled=true);
+  applyDisabled();
+}
+function renderImagePanel() {
+  if(!state.current || state.tab!=='images' || !$('#panel'))return;
+  const photo=cardImageUrl(), avatar=avatarUrl();
+  const imageCard=(kind,title,url,description,warning)=>`<section class="image-card"><div class="row"><h3>${title}</h3>${state.pendingImages[kind]?'<span class="tag warning">待保存</span>':''}</div><div class="image-preview ${kind==='avatar'?'image-avatar':''}">${url?`<img src="${url}" alt="${title}预览">`:'<span class="muted small">尚未设置</span>'}</div><p class="small muted">${description}</p>${warning?`<p class="small warning">${escape(warning)}</p>`:''}<div class="actions"><button data-image-upload="${kind}">${url?'替换':'添加'}${title}</button>${state.pendingImages[kind]?`<button class="quiet" data-image-discard="${kind}">撤销本次选择</button>`:''}</div>${kind==='avatar'?'<button class="quiet" data-action="avatar-follow">使用角色卡图片</button>':''}</section>`;
+  $('#panel').innerHTML=`<p class="small muted image-intro">支持 PNG、JPEG、WebP，文件最大 20 MiB。选择后可预览，点击“保存并同步”生效。</p><div class="image-grid">${imageCard('card_image','角色卡图片',photo,'用于 PNG 导出的底图；未设置时使用头像。',state.pendingImages.card_image?null:state.cardImageWarning)}${imageCard('avatar','头像',avatar,'用于角色头像，可单独上传；最长边自动缩放至 512 像素。',avatarWarning())}</div><p class="small muted section">图片替换按普通编辑保存；同时修改角色版本时，图片会随完整快照留档。</p>`;
+  applyDisabled();
+}
+function greetings(key,label) {
+  const values=state.document.data[key]||[];
+  return `<section><div class="row"><h3>${label}</h3><button data-add-greeting="${key}">添加</button></div>${values.map((v,i)=>`<div class="greeting-entry"><label class="field"><span class="field-label">${label} ${i+1}</span><textarea data-greeting="${key}" data-index="${i}" rows="3">${escape(v)}</textarea></label><button class="quiet" data-remove-greeting="${key}" data-index="${i}">移除此条</button></div>`).join('')}</section>`;
+}
+function capability(key,label) {
+  const value=state.options[key]; const mode=value===null?'all':value.length?'list':'none';
+  return `<label class="field"><span class="field-label">${label}</span><select data-mode="${key}"><option value="all" ${mode==='all'?'selected':''}>全部可用</option><option value="none" ${mode==='none'?'selected':''}>全部禁用</option><option value="list" ${mode==='list'?'selected':''}>指定名称</option></select></label>${mode==='list'?field('名称列表',key,value.join('\n'),{scope:'capability-list',area:true,hint:'每行一个已注册的名称'}):''}`;
+}
+function renderAstrbot() {
+  const c=state.current, sync=c.sync;
+  const lockHint=sync.core_locked?`<div class="notice">绑定的人格已被人工锁定，请在聊天中发送 /ps unlock ${escape(c.persona_id)} 后刷新。</div>`:'';
+  const abnormal=['conflict','failed','missing','pending'].includes(sync.status);
+  $('#panel').innerHTML=`${lockHint}${abnormal?`<div class="notice"><p>${escape(sync.error||statusNames[sync.status])}</p><div class="actions">${sync.status==='conflict'&&sync.same_record?'<button data-action="sync-diff">查看差异</button>':''}${['failed','pending'].includes(sync.status)?'<button data-action="sync">手动重试同步</button>':''}</div></div>`:''}<div class="details-row"><span>绑定人格</span><span>${escape(c.persona_id||'尚未绑定')}</span></div><div class="details-row"><span>同步状态</span><span class="${sync.status==='synced'?'ok':'warning'}">${statusNames[sync.status]||escape(sync.status)}</span></div><div class="details-row"><span>创建者</span><span>${escape(c.owner?c.owner.join(' / '):'未设归属 · 由管理员管理')}</span></div><div class="actions section">${c.persona_id?'<button data-action="unbind">解除绑定</button>':'<button data-action="bind">创建并绑定人格</button>'}<button data-action="lock">${c.locked?'解锁角色卡':'锁定角色卡'}</button>${!c.deleted?'<button data-action="archive" class="danger">归档角色卡</button>':''}</div><div class="form section">${capability('tools','可用工具')}${capability('skills','可用技能')}${field('自定义错误回复','custom_error_message',state.options.custom_error_message||'',{scope:'options-null',area:true,hint:'留空时清除。此项及工具、技能独立于人物卡标准字段。'})}</div>`;
+}
+let previewTimer, previewRevision=0;
+function renderPreview() {
+  clearTimeout(previewTimer);
+  const revision=++previewRevision;
+  if(!state.current)return;
+  const card=clone(draftDocument()), options=clone(state.options);
+  $('#preview').hidden=false;
+  previewTimer=setTimeout(async()=>{
+    try {
+      const result=await post('preview',{card,options});
+      if(revision!==previewRevision || !state.current)return;
+      const d=result.document.data, compiled=result.compiled;
+      const replace=text=>String(text||'').replace(/\{\{(char|user)\}\}/g,(_,key)=>key==='char'?d.name:'访客');
+      const original=compiled.literal_system_prompt?d.extensions?.astrbot_persona_studio?.persona_import?.persona?.system_prompt||'':'';
+      const prompt=original+replace(compiled.system_prompt.slice(original.length));
+      const messages=[...(compiled.begin_dialogs||[]).map((content,i)=>({role:i%2?'assistant':'user',content})),...compiled.examples.flat().map(m=>({...m,content:replace(m.content)}))];
+      const greetings=[d.first_mes,...d.alternate_greetings];
+      const book=d.character_book?.entries?.length||0;
+      $('#preview').innerHTML=`<h2>运行预览</h2><p class="small muted">当前编辑内容 · 用户名示例：访客</p><div class="preview-columns"><section class="section"><div class="section-label">人格提示词</div><pre>${escape(prompt)}</pre></section><section class="section"><div class="section-label">示例与预设对话</div><pre>${escape(messages.map(m=>`${m.role}: ${m.content}`).join('\n')||'未设置')}</pre></section><section class="section"><div class="section-label">选定开场白（私聊）</div><div class="greeting">${escape(replace(greetings[options.greeting_index])||'未设置')}</div></section>${d.post_history_instructions?`<section class="section"><div class="section-label">历史后临时补充</div><pre>${escape(replace(d.post_history_instructions))}</pre></section>`:''}<section class="section"><div class="section-label">世界书</div><p class="small">${book?`${book} 条内容已保留`:'未附带世界书'}</p><p class="small muted">引擎未启用 · 不参与对话</p></section>${compiled.warnings.length?`<section class="section"><div class="section-label">适配说明</div>${compiled.warnings.map(w=>`<p class="small muted">${escape(w)}</p>`).join('')}</section>`:''}</div>`;
+    }catch(error){if(revision===previewRevision)$('#preview').innerHTML=`<h2>运行预览</h2><p class="warning">${escape(error.message)}</p>`;}
+  },250);
+}
+function updateSavebar() {
+  if(!state.current || !$('#save'))return;
+  const changed=dirty(), version=versionChanged();
+  $('#save').disabled=state.busy||!changed||state.current.locked||state.current.deleted||state.current.sync.core_locked;
+  $('#save').textContent=state.busy?'正在保存…':version?'保存、定版并同步':'保存并同步';
+  $('#save-state').textContent=changed?'编辑尚未保存':`卡片已保存 · ${statusNames[state.current.sync.status]||state.current.sync.status}`;
+  $('#save-state').className=!changed&&state.current.sync.status==='synced'?'ok small':'small';
+  $('#save-help').textContent=version?`角色版本 ${state.current.document.data.character_version||'未设置'} → ${draftDocument()?.data?.character_version||'未设置'}，将新增快照`:'普通保存不生成快照';
+  if($('#dirty-label'))$('#dirty-label').textContent=changed?'未保存':'';
+}
+async function save() {
+  if(state.raw!==null) {
+    const parsed=JSON.parse(state.raw);
+    if(!parsed.data || typeof parsed.data.name!=='string')throw Error('角色卡必须包含 data.name。');
+    state.document=parsed;
+  }
+  const images=Object.fromEntries(Object.entries(state.pendingImages).map(([kind,value])=>[kind,value.upload_id]));
+  const card=await post('update',{card_id:state.current.card_id,expected_revision:state.current.revision,card:state.document,options:state.options,...(Object.keys(images).length?{images}:{})});
+  const snapshotAdded=card.snapshots.length>state.current.snapshots.length;
+  adopt(card);render();
+  notice(card.sync.status==='synced'?`卡片已保存并同步${snapshotAdded?'，已保存角色版本快照':'，未新增快照'}。`:`卡片已保存，${statusNames[card.sync.status]}。${card.sync.error||''}`,['failed','conflict','missing'].includes(card.sync.status));
+}
+async function mutation(action,extra={}) {
+  if(dirty())throw Error('请先保存或放弃当前编辑，再执行此操作。');
+  const card=await post(action,{card_id:state.current.card_id,expected_revision:state.current.revision,...extra});
+  adopt(card);await loadList();render();
+  notice(`操作已完成。${card.sync.error||''}`,['failed','conflict','missing'].includes(card.sync.status));
+}
+function diffHtml(before,after) {
+  const keys=[...new Set([...Object.keys(before),...Object.keys(after)])];
+  const changes=keys.filter(key=>JSON.stringify(before[key])!==JSON.stringify(after[key]));
+  const format=v=>typeof v==='string'?v:JSON.stringify(v,null,2)??'（不存在）';
+  return changes.map(key=>`<section class="diff-section"><h3>${escape(key)}</h3><div class="before"><p class="small muted">当前</p><pre>${escape(format(before[key]))}</pre></div><div class="after"><p class="small muted">目标</p><pre>${escape(format(after[key]))}</pre></div></section>`).join('')||'<p class="muted">内容相同</p>';
+}
+
+$('#dialog-close').addEventListener('click',closeModal);
+$('#search').addEventListener('input',renderLibrary);
+$('#refresh-button').addEventListener('click',()=>busy(async()=>{if(!await requireClean())return;await loadList();if(state.current)await openCard(state.current.card_id);notice('已刷新。');}));
+$('#archived').addEventListener('change',()=>busy(async()=>{if(!await requireClean()){$('#archived').checked=state.deleted;return;}state.deleted=$('#archived').checked;state.current=null;await loadList();render();}));
+$('#new-button').addEventListener('click',async()=>{
+  if(state.busy || !await requireClean())return;
+  modal('新建角色卡',`<div class="form"><label class="field">角色名称<input id="new-name" value="新角色" maxlength="255"></label><p class="small muted">使用 Character Card V3 格式。</p><label class="checkbox-label"><input id="new-bind" type="checkbox" checked>同时创建并绑定 AstrBot 人格</label></div><div class="dialog-footer"><button data-action="create-confirm" class="primary">创建角色卡</button></div>`);
+});
+$('#import-button').addEventListener('click',()=>{if(!state.busy)$('#upload').click();});
+$('#upload').addEventListener('change',()=>busy(async()=>{
+  const file=$('#upload').files[0];$('#upload').value='';if(!file)return;
+  if(file.size>20*1024*1024)throw Error('文件最大为 20 MiB。');
+  const result=await bridge.upload('import',file);
+  const d=result.card.data;
+  const avatarHint=({ccdefault:result.has_image?'使用原始 PNG':'无随附 PNG',data:'来自 Data URL',https:'来自 HTTPS（打开时读取）',__asset:'来自 PNG 内嵌资源'})[result.avatar_source]||(result.avatar_source?'暂不支持的资源引用':'未声明主头像');
+  modal('导入预览',`<div class="details-row"><span>名称</span><span>${escape(d.name)}</span></div><div class="details-row"><span>格式 / 角色版本</span><span>V3 / ${escape(d.character_version||'未设置')}</span></div><div class="details-row"><span>主头像</span><span>${escape(avatarHint)}</span></div><div class="details-row"><span>原始 PNG</span><span>${result.has_image?'已保留':'未附带'}</span></div>${result.avatar_warning?`<p class="small warning">${escape(result.avatar_warning)}</p>`:''}<div class="details-row"><span>世界书</span><span>${d.character_book?.entries?.length||0} 条 · 仅保留</span></div><p class="small muted">V2 输入统一转换为 V3，保留角色版本。</p><div class="section">${result.compiled.warnings.map(w=>`<p class="small warning">${escape(w)}</p>`).join('')}</div><div class="dialog-footer">${state.current&&!state.current.locked&&!state.current.deleted?`<button data-action="import-update" data-import="${result.import_id}">更新当前「${escape(state.current.document.data.name)}」</button>`:''}<button data-action="import-create" data-import="${result.import_id}" class="primary">导入为新卡并绑定人格</button></div>`);
+}));
+$('#image-upload').addEventListener('change',()=>busy(async()=>{
+  const input=$('#image-upload'), file=input.files[0], kind=input.dataset.kind;
+  input.value='';
+  if(!file || !state.current || !['card_image','avatar'].includes(kind))return;
+  if(state.current.locked || state.current.deleted || state.current.sync.core_locked)throw Error('当前角色卡不可编辑。');
+  if(file.size>20*1024*1024)throw Error('图片文件最大为 20 MiB。');
+  const current=state.current;
+  const result=await bridge.upload(kind==='avatar'?'upload-avatar':'upload-card-image',file);
+  if(state.current!==current)return;
+  if(!validImageUrl(result.data_url))throw Error('图片预览数据无效，请重新选择。');
+  state.pendingImages[kind]=result;
+  renderImagePanel();renderIdentity();updateSavebar();
+  notice('图片已选择，点击“保存并同步”后生效。');
+}));
+document.addEventListener('input',event=>{
+  const el=event.target;
+  if(!state.current)return;
+  if(el.id==='raw-json'){state.raw=el.value;renderPreview();updateSavebar();return;}
+  if(el.dataset.greeting){state.document.data[el.dataset.greeting][Number(el.dataset.index)]=el.value;}
+  else if(el.dataset.field){
+    const key=el.dataset.field,scope=el.dataset.scope;
+    if(scope==='data')state.document.data[key]=el.value;
+    if(scope==='tags')state.document.data.tags=el.value.split(/[、,，]/).map(s=>s.trim()).filter(Boolean);
+    if(scope==='options-number')state.options[key]=Number(el.value);
+    if(scope==='options-null')state.options[key]=el.value||null;
+    if(scope==='capability-list')state.options[key]=el.value.split('\n').map(s=>s.trim()).filter(Boolean);
+  }else return;
+  if(el.dataset.field==='name')renderIdentity();
+  renderPreview();updateSavebar();
+});
+document.addEventListener('change',event=>{
+  const el=event.target;
+  if(el.id==='show-keys'){state.showKeys=el.checked;$('#studio').classList.toggle('show-keys',state.showKeys);}
+  if(el.dataset.mode){state.options[el.dataset.mode]=el.value==='all'?null:el.value==='none'?[]:[''];renderPanel();updateSavebar();}
+});
+document.addEventListener('click',event=>{
+  const button=event.target.closest('button');if(!button)return;
+  if(button.dataset.confirm){$('#confirm-dialog').close(button.dataset.confirm);return;}
+  if(state.busy)return;
+  if(button.dataset.imageUpload || button.dataset.imageDiscard || button.dataset.action==='avatar-follow'){
+    if(!state.current || state.current.locked || state.current.deleted || state.current.sync.core_locked)return;
+    if(button.dataset.imageUpload){const input=$('#image-upload');input.dataset.kind=button.dataset.imageUpload;input.click();return;}
+    if(button.dataset.imageDiscard)delete state.pendingImages[button.dataset.imageDiscard];
+    else state.pendingImages.avatar={upload_id:'ccdefault'};
+    renderImagePanel();renderIdentity();updateSavebar();return;
+  }
+  if(button.dataset.card){busy(async()=>{if(await requireClean())await openCard(button.dataset.card);});return;}
+  if(button.dataset.tab){
+    if(state.raw!==null && button.dataset.tab!=='source'){
+      busy(async()=>{const result=await post('preview',{card:JSON.parse(state.raw),options:state.options});state.document=result.document;state.raw=null;state.tab=button.dataset.tab;render();});return;
+    }
+    state.tab=button.dataset.tab;render();return;
+  }
+  if((button.dataset.addGreeting || button.dataset.removeGreeting) && (state.current.locked || state.current.deleted))return;
+  if(button.dataset.addGreeting){(state.document.data[button.dataset.addGreeting]??=[]).push('');renderPanel();updateSavebar();return;}
+  if(button.dataset.removeGreeting){state.document.data[button.dataset.removeGreeting].splice(Number(button.dataset.index),1);renderPanel();renderPreview();updateSavebar();return;}
+  if(button.dataset.snapshot){busy(async()=>{
+    const result=await post('snapshot',{card_id:state.current.card_id,snapshot_id:button.dataset.snapshot});
+    modal(`版本 ${result.character_version||'未设置'} · 与当前内容比较`,diffHtml({...state.document.data,'AstrBot options':state.options},{...result.snapshot.document.data,'AstrBot options':result.snapshot.options})+`<details class="section"><summary>查看完整快照</summary><pre>${escape(JSON.stringify(result.snapshot,null,2))}</pre></details><div class="dialog-footer"><button data-action="restore" data-id="${result.snapshot_id}" class="primary" ${state.current.locked?'disabled':''}>恢复此快照</button></div>`);
+    applyDisabled();
+  });return;}
+  const action=button.dataset.action;
+  if(action==='save'){busy(save);return;}
+  if(action==='create-confirm'){busy(async()=>{
+    const card=await post('create',{card:{spec:'chara_card_v3',spec_version:'3.0',data:{name:$('#new-name').value}},bind:$('#new-bind').checked});
+    closeModal();state.deleted=false;$('#archived').checked=false;state.tab='character';adopt(card);await loadList();render();notice(`角色卡已创建。${card.sync.error||''}`);
+  });return;}
+  if(action==='import-create'||action==='import-update'){busy(async()=>{
+    if(!await requireClean())return;
+    const updating=action==='import-update';
+    if(updating&&!await confirmAction('用导入的完整卡片替换当前卡片？角色版本变化时会保存替换后的快照。'))return;
+    const card=await post(updating?'update':'create',updating?{card_id:state.current.card_id,expected_revision:state.current.revision,import_id:button.dataset.import}:{import_id:button.dataset.import});
+    closeModal();state.deleted=false;$('#archived').checked=false;adopt(card);await loadList();render();notice(`角色卡已${updating?'更新':'导入'}。${card.sync.error||''}`);
+  });return;}
+  if(action==='export'){
+    modal('导出角色卡',`<div class="form"><label class="field">格式<select id="export-format"><option value="json">JSON</option><option value="png">PNG 人物卡</option></select></label><p class="small muted">统一导出为 Character Card V3。</p><p class="small muted">导出已保存内容${dirty()?'；当前尚有未保存修改':''}。</p></div><div class="dialog-footer"><button class="primary" data-action="export-confirm">下载角色卡</button></div>`);return;
+  }
+  if(action==='export-confirm'){busy(async()=>{const params={card_id:state.current.card_id,format:$('#export-format').value};await bridge.download('export',params);closeModal();});return;}
+  if(action==='sync-diff'){
+    const sync=state.current.sync;
+    modal('人格同步差异',diffHtml({system_prompt:sync.current.system_prompt,begin_dialogs:sync.current.begin_dialogs},sync.desired)+`<div class="dialog-footer"><button class="primary" data-action="overwrite">用角色卡覆盖人格</button></div>`);return;
+  }
+  if(action==='overwrite'){busy(async()=>{await mutation('sync',{overwrite:true,expected_core_token:state.current.sync.expected_core_token});closeModal();});return;}
+  if(action==='sync'){busy(()=>mutation('sync'));return;}
+  if(action==='bind'){busy(()=>mutation('bind'));return;}
+  if(action==='unbind'){busy(async()=>{if(await confirmAction('解除绑定后，角色卡和 AstrBot 人格都会保留。继续？'))await mutation('unbind');});return;}
+  if(action==='lock'){busy(()=>mutation('lock',{locked:!state.current.locked}));return;}
+  if(action==='archive'){busy(async()=>{if(await confirmAction('归档角色卡并停止卡片适配？快照与 AstrBot 人格都会保留，可从快照恢复。'))await mutation('archive');});return;}
+  if(action==='restore'){busy(async()=>{if(await confirmAction('恢复会覆盖当前卡片内容和 AstrBot 专用配置，不额外保存当前内容。继续？')){await mutation('restore',{snapshot_id:button.dataset.id});closeModal();}});}
+});
+window.addEventListener('beforeunload',event=>{if(dirty()){event.preventDefault();event.returnValue='';}});
+
+async function start() {
+  if(!bridge){notice('请从 AstrBot WebUI 的插件页面进入人格工坊。',true);$('#card-list').textContent='尚未连接';return;}
+  bridge.onContext(context=>{document.documentElement.dataset.theme=context.isDark?'dark':'light';});
+  await bridge.ready();
+  await busy(async()=>{await loadList();if(state.items.length)await openCard(state.items[0].card_id);else render();});
+}
+start().catch(error=>notice(error.message,true));

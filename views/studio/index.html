@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>人格工坊</title>
+  <link rel="stylesheet" href="./app.css">
+  <script src="/api/plugin/page/bridge-sdk.js"></script>
+  <script type="module" src="./app.js"></script>
+</head>
+<body>
+  <div id="studio">
+    <header class="topbar">
+      <div><h1>人格工坊</h1><p class="muted small">Character Card V3 · 兼容 V2 导入</p></div>
+      <div class="actions"><button id="import-button">导入 JSON / PNG</button><button id="new-button">新建角色</button></div>
+    </header>
+    <div id="notice" role="status" hidden></div>
+    <div id="conversion-notice" class="notice" role="status" hidden></div>
+    <div class="workspace">
+      <aside class="library" aria-label="角色库">
+        <div class="row"><h2>角色库</h2><button id="refresh-button" class="quiet">刷新</button></div>
+        <label class="sr-only" for="search">搜索角色</label><input id="search" type="search" placeholder="搜索角色名称">
+        <label class="archive-choice"><input id="archived" type="checkbox">查看已归档</label>
+        <div id="card-list" aria-label="角色列表"><p class="muted">正在连接 AstrBot…</p></div>
+      </aside>
+      <main id="editor"><p class="empty muted">选择角色卡，或导入已有的 JSON / PNG。</p></main>
+      <aside id="preview" class="preview" aria-label="运行预览" hidden></aside>
+    </div>
+    <input id="upload" type="file" accept=".json,.png,application/json,image/png" hidden>
+    <input id="image-upload" type="file" accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp" hidden>
+    <dialog id="dialog"><div class="dialog-head"><h2 id="dialog-title"></h2><button id="dialog-close" aria-label="关闭弹窗">关闭</button></div><div id="dialog-body"></div></dialog>
+    <dialog id="confirm-dialog"><h2>确认操作</h2><p id="confirm-text"></p><div class="dialog-footer"><button data-confirm="cancel">取消</button><button data-confirm="confirm" class="primary">确认</button></div></dialog>
+  </div>
+</body>
+</html>

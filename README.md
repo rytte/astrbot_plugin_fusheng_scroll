@@ -1,12 +1,25 @@
 # 🎭 人格工坊 · Persona Studio
 
-在聊天中创造一个新人格，边聊边打磨，可以随时翻看旧版本。
+使用酒馆 Character Card V3 角色卡，兼容 V2 导入，在插件页面管理角色，也可在聊天中编辑与切换人格。
 
-`astrbot_plugin_persona_studio` 为 AstrBot 提供 **10 个模型工具**，支持人格创建、编辑、切换、历史恢复，以及图片、文字和 Markdown 文件展示。管理员可以直接使用，也可以授权可信用户管理各自创建的人格。
+`astrbot_plugin_persona_studio` 为 AstrBot 提供 **18 个模型工具**，支持人格创建、编辑、切换、历史恢复，以及图片、文字和 Markdown 文件展示。管理员可以直接使用，也可以授权可信用户管理各自创建的人格。
 
 [功能一览](#features) · [安装与启用](#getting-started) · [聊天示例](#examples) · [模型工具](#tools) · [查看与导出](#display) · [权限与锁定](#permissions) · [使用与配置](./docs/使用与配置.md) · [开发验证](./docs/使用与配置.md#development)
 
 <a id="features"></a>
+
+## 🎴 角色卡与插件页面
+
+在 AstrBot WebUI 的插件管理中打开本插件页面（`studio`），即可导入 V2/V3 JSON 或 PNG、新建 V3 角色卡、编辑设定、查看实际编译预览、导出 V3 JSON/PNG、比较及恢复历史快照。V2 仅作为导入兼容格式，导入后统一转换并保存为 V3，保留角色版本。页面使用 AstrBot 原生认证与页面桥接，无需额外端口或独立登录。
+
+- **统一角色库**：打开或刷新时，AstrBot 现有人格自动转为 V3 并保留原绑定，标记“来自 AstrBot”。已有卡片不重复转换，原归属、人工锁及会话引用保留。转换保存一份初始快照，原提示词与预设对话按原方式运行。
+- **版本由作者决定**：初始保存留一份快照；此后只有 `data.character_version` 改变时，保存修改后的完整快照。普通保存不增加快照，也不自动修改角色版本。恢复不额外创建快照。
+- **角色卡是主数据**：原始字段、世界书和未知扩展保存在插件数据库；AstrBot 人格保存编译后的运行内容。外部编辑引起同步冲突时，页面显示差异，可明确覆盖或解除绑定。
+- **首版范围**：适配角色设定、示例对话、开场白与历史后指令；世界书、脚本、正则及扩展宏只保留数据。开场白作为新对话的临时背景消息，不会自动向聊天发送。
+- **角色图片**：页面“图片与头像”支持分别上传、预览和替换底图与头像，保存后生效，PNG 导出优先使用底图。按 V3 `assets` 的 `icon/main` 解析主头像，支持原始 PNG、Data URL、HTTPS 和 PNG 内嵌资源。解析成功后固定缓存，保存和恢复后刷新头像；CHARX 包内引用暂不支持。
+- **数据位置**：`data/plugin_data/astrbot_plugin_persona_studio/studio.sqlite3` 保存卡片、权限、绑定、快照和图片缓存映射；同目录 `assets/` 保存原始 PNG 与解析后的图片。备份时一起保存。AstrBot 原有核心数据库继续保存运行人格。
+
+详细字段映射、日期、同步行为及开发验证见 [角色卡说明](./docs/角色卡.md)。以下普通人格功能与备份接口继续保留，普通人格的自动备份策略与角色卡的定版快照相互独立。
 
 ## 🧩 能做什么
 
@@ -28,10 +41,10 @@
 
 | 项目 | 要求 |
 | --- | --- |
-| AstrBot | `>=4.27,<5`，本地验证版本为 `4.27.4` |
+| AstrBot | `>=4.29.3,<5`，本地验证版本为 `4.29.3` |
 | 模型 | 在 AstrBot 中配置支持工具调用的模型，并为目标会话启用模型对话 |
 | 图片展示 | 图片渲染依赖于 [浏览器服务](https://cloud.astrbot.app/plugin/rytte/astrbot_plugin_browser) 插件，可以从插件市场搜索安装 |
-| Python 依赖 | `markdown-it-py>=4.0,<5`，见 [requirements.txt](./requirements.txt) |
+| Python 依赖 | Markdown 解析及图片处理依赖，见 [requirements.txt](./requirements.txt)；图片使用核心已有的 aiohttp / Pillow |
 
 ### 2. 安装插件
 
@@ -75,7 +88,7 @@ https://github.com/rytte/astrbot_plugin_persona_studio
 
 ## 🛠️ 模型工具
 
-共 **6 个人格工具、4 个备份工具**，每个工具对应一个操作。
+共 **6 个人格工具、4 个普通人格备份工具、8 个角色卡工具**，每个工具对应一个操作。
 
 | 工具 | 简要说明 |
 | --- | --- |
@@ -89,6 +102,8 @@ https://github.com/rytte/astrbot_plugin_persona_studio
 | `persona_backup_get` | 查看历史快照，支持与当前人格相同的展示形式 |
 | `persona_backup_restore` | 恢复指定备份，并产生新版本 |
 | `persona_backup_delete` | 永久删除指定备份，保留当前人格 |
+
+角色卡工具：`character_list`、`character_get`、`character_create`、`character_update`、`character_archive`、`character_snapshot_list`、`character_snapshot_get`、`character_snapshot_restore`。更新与恢复必须携带最新查询得到的整数 `expected_revision`；模型不能锁定、解锁或强制覆盖冲突。切换卡片绑定的人格仍使用 `persona_switch`。
 
 参数直接提交给对应工具，完整参数与行为说明见 [模型工具参考](./docs/使用与配置.md#tools)。
 
@@ -147,7 +162,7 @@ https://github.com/rytte/astrbot_plugin_persona_studio
 
 <a id="versions"></a>
 
-## 🗂️ 版本与恢复
+## 🗂️ 普通人格备份与恢复
 
 修改、删除以及恢复已有的人格前，插件会先保存完整快照；备份失败时拒绝执行该次核心操作。删除前还会检查配置、子代理、对话绑定、强制会话规则与持久化任务中的引用，需要先通过有权限的入口解除引用。
 
@@ -155,7 +170,7 @@ https://github.com/rytte/astrbot_plugin_persona_studio
 
 备份按数量与天数保留，默认每条版本链最多 **50 份、90 天**，每小时及写入、解锁后执行清理，锁定的版本链延后清理。永久删除备份不可撤销，也不会改变当前人格。
 
-全部 **6 个人格工具 + 4 个备份工具**、必填参数和恢复范围见 [模型工具](./docs/使用与配置.md#tools)。
+普通人格的 **6 个人格工具 + 4 个备份工具**、必填参数和恢复范围见 [模型工具](./docs/使用与配置.md#tools)。
 
 <a id="boundaries"></a>
 
@@ -166,7 +181,7 @@ https://github.com/rytte/astrbot_plugin_persona_studio
 > **本插件保留以下两项已知核心风险：**
 >
 > - **外部并发写入**：插件锁只约束本插件实例，WebUI、其他插件或进程的并发修改可能被覆盖，中间更新也可能未被备份。恢复令牌只能发现读取时已可见的变化，修改、删除和恢复时应避免其他入口同时操作同一人格。
-> - **显式工具列表的权限路径**：本地验证的 AstrBot `4.27.4` 中，显式指定工具名称可能绕过核心组件的“仅管理员”包装。若工具内部未独立鉴权，白名单用户配置该名称后可能调用成功。本插件不补查其他工具的执行权限，也不额外禁止配置管理员工具名称；请仅授权可信用户，相关工具应在执行内部检查调用者权限。
+> - **显式工具列表的权限路径**：本地验证的 AstrBot `4.29.3` 中，显式指定工具名称可能绕过核心组件的“仅管理员”包装。若工具内部未独立鉴权，白名单用户配置该名称后可能调用成功。本插件不补查其他工具的执行权限，也不额外禁止配置管理员工具名称；请仅授权可信用户，相关工具应在执行内部检查调用者权限。
 >
 > 复现条件与影响范围见 [已接受的核心风险](./docs/使用与配置.md#risks)，后续核心版本需重新核对。
 

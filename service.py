@@ -31,6 +31,7 @@ class PersonaStudio:
         self.storage = storage
         self.manager = context.persona_manager
         self.lock = asyncio.Lock()
+        self.cards = None
 
     def settings(self) -> Settings:
         return Settings.parse(self.config)
@@ -439,6 +440,11 @@ class PersonaStudio:
         changes = {
             name: value for name, value in payload.items() if name in CONTENT_FIELDS
         }
+        if self.cards is not None and self.cards.storage.by_persona(persona_id):
+            raise StudioError(
+                "card_managed",
+                "该人格由角色卡管理，请使用 character_update 或插件页面编辑；删除请先解除绑定。",
+            )
         if action == "update":
             if not changes:
                 raise StudioError("invalid_payload", "更新至少需要一个内容或能力字段。")
@@ -568,6 +574,13 @@ class PersonaStudio:
                 "undoable": False,
                 "current_persona_unchanged": True,
             }
+        if self.cards is not None and self.cards.storage.by_persona(
+            record["persona_id"]
+        ):
+            raise StudioError(
+                "card_managed",
+                "该人格由角色卡管理，请使用角色卡快照恢复，或先解除绑定。",
+            )
         if state["record_conflict"]:
             raise StudioError(
                 "record_conflict", "同名人格已属于其他核心记录，不能用旧备份覆盖。"
