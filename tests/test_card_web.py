@@ -104,6 +104,69 @@ async def test_authenticated_web_full_import_edit_history_export(web):
     assert avatar["data_url"].startswith("data:image/png;base64,")
 
 
+async def test_web_archive_unarchive_and_permanent_delete_preserve_core(web):
+    document = new_card("待清理角色")
+    response = await web.client.post(
+        PREFIX + "/import",
+        files={"file": ("character.png", export_png(document), "image/png")},
+    )
+    import_id = response.json()["data"]["import_id"]
+
+    async def action(name, payload):
+        return await web.client.post(
+            PREFIX + "/action", json={"action": name, "payload": payload}
+        )
+
+    c = (await action("create", {"import_id": import_id})).json()["data"]
+    c = (
+        await action(
+            "update",
+            {
+                "card_id": c["card_id"],
+                "expected_revision": c["revision"],
+                "data": {"description": "最后一次编辑"},
+            },
+        )
+    ).json()["data"]
+    current = c["document"]
+    for name in ("archive", "unarchive", "archive"):
+        response = await action(
+            name, {"card_id": c["card_id"], "expected_revision": c["revision"]}
+        )
+        assert response.status_code == 200, response.text
+        c = response.json()["data"]
+        assert c["document"] == current and len(c["snapshots"]) == 1
+    core = await web.cards.studio.current(c["persona_id"])
+    payload = {
+        "card_id": c["card_id"],
+        "expected_revision": c["revision"],
+        "confirm_name": "错误名称",
+    }
+    assert (await action("delete", payload)).status_code == 400
+    payload["confirm_name"] = document["data"]["name"]
+    response = await action("delete", payload)
+    assert response.status_code == 200, response.text
+    assert response.json()["data"]["deleted"]
+    assert await web.cards.studio.current(c["persona_id"]) == core
+    for route in ("/card", "/export", "/card-image", "/avatar"):
+        response = await web.client.get(
+            PREFIX + route, params={"card_id": c["card_id"]}
+        )
+        assert response.status_code == 400
+    assert (await action("delete", payload)).status_code == 400
+    for deleted in ("false", "true"):
+        listed = (
+            await web.client.get(PREFIX + "/cards", params={"deleted": deleted})
+        ).json()["data"]
+        assert c["persona_id"] not in {item["persona_id"] for item in listed["items"]}
+    assert (
+        web.cards.storage.connection.execute(
+            "SELECT * FROM card_imports WHERE import_id=?", (import_id,)
+        ).fetchone()
+        is None
+    )
+
+
 async def test_page_list_includes_existing_core_personas_and_keeps_bindings(web):
     await web.cards.studio.manager.create_persona(
         "已有 AstrBot 人格", system_prompt="完整提示词", begin_dialogs=["问题", "回答"]
@@ -430,6 +493,49 @@ def image_pixels(raw):
 
 def decode_image(url):
     return base64.b64decode(url.split(",", 1)[1])
+
+
+@pytest.mark.parametrize("endpoint", ["card-image", "avatar"])
+async def test_gallery_thumbnail_preserves_original_image_and_revision(web, endpoint):
+    card = await web_card(web)
+    uploaded = await image_upload(
+        web, "card_image", picture(size=(1200, 800), color="blue")
+    )
+    card = await image_save(web, card, {"card_image": uploaded["upload_id"]})
+    params = {"card_id": card["card_id"]}
+    original = (await web.client.get(PREFIX + "/" + endpoint, params=params)).json()[
+        "data"
+    ]
+    response = await web.client.get(
+        PREFIX + "/" + endpoint, params={**params, "thumbnail": "true"}
+    )
+    assert response.status_code == 200, response.text
+    thumbnail = response.json()["data"]
+    assert image_pixels(decode_image(thumbnail["data_url"]))[0] == (512, 341)
+    assert thumbnail["revision"] == card["revision"]
+    assert thumbnail["warning"] == original["warning"]
+    assert image_pixels(decode_image(original["data_url"]))[0] == (1200, 800)
+    assert (await web.client.get(PREFIX + "/" + endpoint, params=params)).json()[
+        "data"
+    ] == original
+
+
+async def test_gallery_list_has_bounded_description_and_tags(web):
+    document = new_card("画廊简介")
+    document["data"].update(description="星空" * 200, tags=["天文", "日常"])
+    created = await web.client.post(
+        PREFIX + "/action", json={"action": "create", "payload": {"card": document}}
+    )
+    assert created.status_code == 200, created.text
+    card = created.json()["data"]
+    response = await web.client.get(PREFIX + "/cards")
+    item = next(
+        item
+        for item in response.json()["data"]["items"]
+        if item["card_id"] == card["card_id"]
+    )
+    assert item["description"] == "星空" * 120
+    assert item["tags"] == ["天文", "日常"]
 
 
 @pytest.mark.parametrize("fmt", ["PNG", "JPEG", "WEBP"])

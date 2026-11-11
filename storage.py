@@ -57,7 +57,7 @@ class Storage:
                     PRAGMA user_version = 1;
                     COMMIT;
                 """)
-            elif version not in (1, 2, 3, 4, 5):
+            elif version not in (1, 2, 3, 4, 5, 6):
                 raise StudioError(
                     "storage_error", "不支持的权限数据库版本，不进行兼容迁移。"
                 )
@@ -123,6 +123,19 @@ class Storage:
                         created_at REAL NOT NULL
                     );
                     PRAGMA user_version = 5;
+                    COMMIT;
+                """)
+            if version in (0, 1, 2, 3, 4, 5):
+                self.connection.executescript("""
+                    BEGIN;
+                    CREATE TABLE card_deleted_personas (
+                        persona_id TEXT NOT NULL, persona_ref TEXT NOT NULL,
+                        PRIMARY KEY (persona_id, persona_ref)
+                    );
+                    CREATE TABLE card_asset_garbage (
+                        asset_id TEXT PRIMARY KEY
+                    );
+                    PRAGMA user_version = 6;
                     COMMIT;
                 """)
             if self.connection.execute("PRAGMA integrity_check").fetchone()[0] != "ok":

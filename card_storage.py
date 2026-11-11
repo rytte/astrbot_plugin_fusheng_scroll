@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 import tempfile
@@ -88,10 +89,140 @@ class CardStorage:
         seen = {
             tuple(row)
             for row in self.connection.execute(
-                "SELECT persona_id, persona_ref FROM card_persona_sources"
+                "SELECT persona_id, persona_ref FROM card_persona_sources "
+                "UNION SELECT persona_id, persona_ref FROM card_deleted_personas"
             )
         }
         return bound, seen
+
+    def resource_refs(self, contents):
+        """Find both original images and the cache keys used by saved documents."""
+        assets, keys = set(), set()
+        for document, asset_id in contents:
+            if asset_id:
+                assets.add(asset_id)
+            # Preserve every declared image, including inactive/ambiguous icons.
+            # Such a card must remain deletable even if its avatar cannot render.
+            for resource in document["data"].get("assets") or []:
+                uri = resource.get("uri")
+                if not isinstance(uri, str) or uri.lower() == "ccdefault:":
+                    continue
+                keys.add(
+                    digest(
+                        {
+                            "uri": uri,
+                            "container": asset_id
+                            if uri.startswith("__asset:")
+                            else None,
+                        }
+                    )
+                )
+        return assets, keys
+
+    def resource_contents(self, *, card_id=None):
+        condition = " WHERE card_id=?" if card_id is not None else ""
+        args = (card_id,) if card_id is not None else ()
+        contents = [
+            (load_json(row["document"]), row["asset_id"])
+            for row in self.connection.execute(
+                "SELECT document, asset_id FROM cards" + condition, args
+            )
+        ]
+        for row in self.connection.execute(
+            "SELECT snapshot FROM card_snapshots" + condition, args
+        ):
+            snapshot = json.loads(row["snapshot"])
+            contents.append((snapshot["document"], snapshot["asset_id"]))
+        for row in self.connection.execute(
+            "SELECT document, asset_id FROM card_imports"
+            + (
+                condition
+                if card_id is not None
+                else " WHERE card_id IS NOT NULL OR created_at>=?"
+            ),
+            args if card_id is not None else (time.time() - 1800,),
+        ):
+            contents.append((load_json(row["document"]), row["asset_id"]))
+        return contents
+
+    def delete(self, actor, card, expected_revision):
+        """Remove archived content atomically; file removal is retried separately."""
+        card_id = card["card_id"]
+        assets, keys = self.resource_refs(self.resource_contents(card_id=card_id))
+        assets.update(
+            row["asset_id"]
+            for row in self.connection.execute("SELECT * FROM card_asset_cache")
+            if row["cache_key"] in keys
+        )
+        with self.connection:
+            # Keep only the source identity, never the deleted card's content.
+            self.connection.execute(
+                "INSERT OR IGNORE INTO card_deleted_personas "
+                "SELECT persona_id, persona_ref FROM card_persona_sources WHERE card_id=?",
+                (card_id,),
+            )
+            if card["persona_id"] and card["persona_ref"]:
+                self.connection.execute(
+                    "INSERT OR IGNORE INTO card_deleted_personas VALUES (?, ?)",
+                    (card["persona_id"], card["persona_ref"]),
+                )
+            self.connection.executemany(
+                "INSERT OR IGNORE INTO card_asset_garbage VALUES (?)",
+                [(asset_id,) for asset_id in assets],
+            )
+            for table in ("card_snapshots", "card_imports", "card_persona_sources"):
+                self.connection.execute(
+                    f"DELETE FROM {table} WHERE card_id=?", (card_id,)
+                )
+            result = self.connection.execute(
+                "DELETE FROM cards WHERE card_id=? AND revision=? AND deleted=1 AND locked=0",
+                (card_id, expected_revision),
+            )
+            if result.rowcount != 1:
+                raise StudioError(
+                    "revision_conflict", "角色卡状态已改变，请刷新后再操作。"
+                )
+            self.storage.audit(actor, "card.delete", card_id, "success")
+
+    def cleanup_assets(self):
+        """Collect only queued images, preserving every remaining content reference."""
+        queued = [
+            row[0]
+            for row in self.connection.execute(
+                "SELECT asset_id FROM card_asset_garbage"
+            )
+        ]
+        if not queued:
+            return 0
+        assets, keys = self.resource_refs(self.resource_contents())
+        assets.update(
+            row[0]
+            for row in self.connection.execute(
+                "SELECT asset_id FROM card_image_uploads WHERE created_at>=?",
+                (time.time() - 1800,),
+            )
+        )
+        cache = list(self.connection.execute("SELECT * FROM card_asset_cache"))
+        assets.update(row["asset_id"] for row in cache if row["cache_key"] in keys)
+        pending = 0
+        for asset_id in queued:
+            if asset_id in assets:
+                continue
+            # Commit cache invalidation first so a failed unlink can safely retry.
+            with self.connection:
+                self.connection.execute(
+                    "DELETE FROM card_asset_cache WHERE asset_id=?", (asset_id,)
+                )
+            try:
+                self.asset_path(asset_id).unlink(missing_ok=True)
+            except OSError:
+                pending += 1
+                continue
+            with self.connection:
+                self.connection.execute(
+                    "DELETE FROM card_asset_garbage WHERE asset_id=?", (asset_id,)
+                )
+        return pending
 
     def _remember_persona(self, card_id, persona_id, reference):
         if persona_id and reference:

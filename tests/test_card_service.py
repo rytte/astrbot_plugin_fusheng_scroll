@@ -259,6 +259,164 @@ async def test_archive_keeps_runtime_copy_and_restore_unarchives(cards):
     assert not c["deleted"] and c["sync"]["status"] == "synced"
 
 
+async def test_unarchive_preserves_latest_content_options_images_and_snapshots(cards):
+    c = await create(cards)
+    image = await cards.cards.prepare_image(
+        cards.actor, export_png(new_card("图片")), "card_image"
+    )
+    c = await change(
+        cards,
+        c,
+        data={"description": "尚未定版的最新内容"},
+        options={"tools": []},
+        images={"card_image": image["upload_id"]},
+    )
+    assert c["asset_id"]
+    expected = copy.deepcopy(c)
+    core = await cards.studio.current(c["persona_id"])
+    c = await change(cards, c, action="archive")
+    c = await change(cards, c, action="unarchive")
+    assert not c["deleted"] and c["sync"]["status"] == "synced"
+    for key in ("document", "options", "asset_id", "snapshots"):
+        assert c[key] == expected[key]
+    restored_core = await cards.studio.current(c["persona_id"])
+    assert {k: v for k, v in restored_core.items() if k != "updated_at"} == {
+        k: v for k, v in core.items() if k != "updated_at"
+    }
+
+
+async def test_unarchive_checks_card_quota_and_stale_revision(cards):
+    c = await create(cards, bind=False)
+    archived = await change(cards, c, action="archive")
+    with pytest.raises(StudioError) as exc:
+        await change(cards, c, action="unarchive")
+    assert exc.value.code == "revision_conflict"
+    cards.config["max_personas_per_user"] = 1
+    await create(cards, bind=False)
+    with pytest.raises(StudioError) as exc:
+        await change(cards, archived, action="unarchive")
+    assert exc.value.code == "limit_exceeded"
+    assert cards.cards.storage.get(c["card_id"])["deleted"]
+
+
+async def test_permanent_delete_keeps_core_and_prevents_automatic_reimport(cards):
+    c = await create(cards)
+    c = await change(cards, c, action="archive")
+    core = await cards.studio.current(c["persona_id"])
+    payload = {
+        "card_id": c["card_id"],
+        "expected_revision": c["revision"],
+        "confirm_name": "爱莉",
+    }
+    with pytest.raises(StudioError) as exc:
+        await cards.cards.execute(cards.actor, "delete", payload, event=cards.event)
+    assert exc.value.code == "manual_only"
+    result = await cards.cards.execute(cards.actor, "delete", payload)
+    assert result == {"card_id": c["card_id"], "deleted": True, "cleanup_pending": 0}
+    assert await cards.studio.current(c["persona_id"]) == core
+    assert cards.cards.storage.snapshots(c["card_id"]) == []
+    with pytest.raises(StudioError):
+        cards.cards.storage.get(c["card_id"])
+    for _ in range(2):
+        listed = await cards.cards.execute(CardStudio.web_actor("admin"), "list", {})
+        assert c["persona_id"] not in {item["persona_id"] for item in listed["items"]}
+    audit = [
+        json.loads(row[0])
+        for row in cards.storage.connection.execute("SELECT entry FROM audit")
+    ]
+    assert any(
+        item["action"] == "card.delete" and item["target"] == c["card_id"]
+        for item in audit
+    )
+
+
+async def test_permanent_delete_checks_archive_name_revision_ownership_and_locks(cards):
+    c = await create(cards)
+    actor = cards.actor
+
+    async def delete(card, **patch):
+        return await cards.cards.execute(
+            actor,
+            "delete",
+            {
+                "card_id": card["card_id"],
+                "expected_revision": card["revision"],
+                "confirm_name": "爱莉",
+                **patch,
+            },
+        )
+
+    with pytest.raises(StudioError) as exc:
+        await delete(c)
+    assert exc.value.code == "not_archived"
+    old = c
+    c = await change(cards, c, action="archive")
+    for patch, code in [
+        ({"confirm_name": "错名"}, "confirmation_mismatch"),
+        ({"expected_revision": old["revision"]}, "revision_conflict"),
+    ]:
+        with pytest.raises(StudioError) as exc:
+            await delete(c, **patch)
+        assert exc.value.code == code
+    actor = Actor("platform", "other", False)
+    with pytest.raises(StudioError) as exc:
+        await delete(c)
+    assert exc.value.code == "not_found_or_forbidden"
+    actor = cards.actor
+    cards.cards.storage.set_locked(c["card_id"], True)
+    c = await cards.cards.detail(cards.cards.storage.get(c["card_id"]))
+    with pytest.raises(StudioError) as exc:
+        await delete(c)
+    assert exc.value.code == "card_locked"
+    c = await cards.cards.execute(
+        CardStudio.web_actor("admin"),
+        "lock",
+        {"card_id": c["card_id"], "expected_revision": c["revision"], "locked": False},
+    )
+    locked = await cards.studio.execute(
+        cards.native_event(text=f"/ps lock {c['persona_id']}"),
+        "protect",
+        "lock",
+        {"persona_id": c["persona_id"]},
+    )
+    assert locked["ok"]
+    for action in ("delete", "unarchive"):
+        with pytest.raises(StudioError) as exc:
+            if action == "delete":
+                await delete(c)
+            else:
+                await change(cards, c, action=action)
+        assert exc.value.code == "persona_locked"
+    assert cards.cards.storage.get(c["card_id"])["deleted"]
+    assert cards.cards.storage.snapshots(c["card_id"])
+
+
+async def test_maintenance_retries_images_protected_by_unexpired_uploads(cards):
+    c = await create(cards, bind=False)
+    prepared = await cards.cards.prepare_image(
+        cards.actor, export_png(new_card("头像")), "avatar"
+    )
+    # Resolving the saved Data URL also creates the shared on-disk avatar cache.
+    c = await change(cards, c, images={"avatar": prepared["upload_id"]})
+    await cards.cards.avatar(cards.actor, c["card_id"])
+    asset = cards.cards.storage.get_image(cards.actor, prepared["upload_id"], "avatar")
+    c = await change(cards, c, action="archive")
+    await cards.cards.execute(
+        cards.actor,
+        "delete",
+        {
+            "card_id": c["card_id"],
+            "expected_revision": c["revision"],
+            "confirm_name": "爱莉",
+        },
+    )
+    assert cards.cards.storage.asset_path(asset).exists()
+    with cards.storage.connection:
+        cards.storage.connection.execute("UPDATE card_image_uploads SET created_at=0")
+    await cards.studio.maintenance()
+    assert not cards.cards.storage.asset_path(asset).exists()
+
+
 async def test_core_lock_blocks_card_update_and_legacy_writes(cards):
     c = await create(cards)
     legacy = await cards.studio.execute(

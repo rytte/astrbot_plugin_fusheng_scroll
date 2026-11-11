@@ -113,6 +113,8 @@ class PersonaStudio:
             for record in self.storage.records():
                 if not self.state(record, personas.get(record["persona_id"]))["locked"]:
                     self.prune(record, settings)
+            if getattr(self, "cards", None) is not None:
+                await self.cards.cleanup_assets()
 
     def validate_capabilities(self, data: dict):
         if data.get("tools"):

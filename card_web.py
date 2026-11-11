@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import functools
 from urllib.parse import quote
 
@@ -7,6 +8,7 @@ from astrbot.api import logger
 from astrbot.api.web import error_response, request
 from starlette.responses import Response
 
+from .card_assets import CardImage, data_image, prepare_image
 from .cards import MAX_UPLOAD_BYTES
 from .domain import StudioError, check_payload
 
@@ -149,13 +151,23 @@ class CardWeb:
         return {"status": "ok", "data": result}
 
     async def card_image(self, actor):
+        result = await self.cards.card_image(actor, request.query.get("card_id"))
         return {
             "status": "ok",
-            "data": await self.cards.card_image(actor, request.query.get("card_id")),
+            "data": await self.thumbnail(result),
         }
 
     async def avatar(self, actor):
+        result = await self.cards.avatar(actor, request.query.get("card_id"))
         return {
             "status": "ok",
-            "data": await self.cards.avatar(actor, request.query.get("card_id")),
+            "data": await self.thumbnail(result),
         }
+
+    async def thumbnail(self, result):
+        if request.query.get("thumbnail") == "true" and result["data_url"]:
+            raw = await asyncio.to_thread(
+                lambda: prepare_image(data_image(result["data_url"]), avatar=True)
+            )
+            return {**result, "data_url": CardImage(raw, "image/png").data_url}
+        return result

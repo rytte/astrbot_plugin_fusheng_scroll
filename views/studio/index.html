@@ -12,21 +12,24 @@
 <body>
   <div id="studio">
     <header class="topbar">
-      <div><h1>人格工坊</h1><p class="muted small">Character Card V3 · 兼容 V2 导入</p></div>
-      <div class="actions"><button id="import-button">导入 JSON / PNG</button><button id="new-button">新建角色</button></div>
+      <div class="brand"><span class="brand-mark" aria-hidden="true">✦</span><div><h1>人格工坊</h1><p>PERSONA STUDIO</p></div></div>
+      <div class="actions"><button id="import-button"><span data-icon="upload"></span>导入角色</button><button id="new-button" class="primary"><span data-icon="plus"></span>新建角色</button></div>
     </header>
-    <div id="notice" role="status" hidden></div>
+    <div id="notice" role="status" aria-live="polite" aria-atomic="true" hidden><span id="notice-symbol" aria-hidden="true"></span><span id="notice-message"></span><button id="notice-close" aria-label="关闭提示" type="button"><span data-icon="x"></span></button></div>
     <div id="conversion-notice" class="notice" role="status" hidden></div>
-    <div class="workspace">
-      <aside class="library" aria-label="角色库">
-        <div class="row"><h2>角色库</h2><button id="refresh-button" class="quiet">刷新</button></div>
-        <label class="sr-only" for="search">搜索角色</label><input id="search" type="search" placeholder="搜索角色名称">
-        <label class="archive-choice"><input id="archived" type="checkbox">查看已归档</label>
-        <div id="card-list" aria-label="角色列表"><p class="muted">正在连接 AstrBot…</p></div>
-      </aside>
-      <main id="editor"><p class="empty muted">选择角色卡，或导入已有的 JSON / PNG。</p></main>
-      <aside id="preview" class="preview" aria-label="运行预览" hidden></aside>
-    </div>
+    <main id="collection" class="collection" aria-labelledby="collection-title">
+      <header class="collection-heading"><p class="eyebrow">CHARACTER COLLECTION</p><h2 id="collection-title">你的角色，各有故事。</h2><p class="muted">挑选一位角色，继续完善它的世界。</p></header>
+      <div class="collection-toolbar">
+        <div class="collection-filters" role="group" aria-label="角色库范围"><button data-collection="active" aria-pressed="true">全部角色 <span id="card-count" class="count">0</span></button><button data-collection="archived" aria-pressed="false"><span data-icon="archive"></span>已归档</button></div>
+        <div class="collection-tools"><label class="search-field"><span data-icon="search"></span><span class="sr-only">搜索角色名称、简介或标签</span><input id="search" type="search" placeholder="搜索角色"></label><button id="refresh-button" class="icon-button" aria-label="刷新角色库"><span data-icon="refresh"></span></button></div>
+      </div>
+      <div id="card-list" class="card-grid" aria-label="角色列表" aria-live="polite"><div class="empty-state"><span class="loading-dot" aria-hidden="true"></span><h3>正在连接 AstrBot…</h3><p>准备你的角色库</p></div></div>
+      <footer class="collection-footer">Character Card V3 <span aria-hidden="true">·</span> 支持导入 V2 / V3 JSON 与 PNG</footer>
+    </main>
+    <main id="workspace" class="workspace" aria-label="角色编辑工作台" hidden>
+      <div class="editor-topline"><button data-action="back" class="quiet"><span data-icon="arrow-left"></span>返回角色库</button><label class="card-switcher"><span class="sr-only">切换编辑角色</span><select id="card-switcher" aria-label="切换编辑角色"></select></label></div>
+      <div id="editor"></div>
+    </main>
     <input id="upload" type="file" accept=".json,.png,application/json,image/png" hidden>
     <input id="image-upload" type="file" accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp" hidden>
     <dialog id="dialog"><div class="dialog-head"><h2 id="dialog-title"></h2><button id="dialog-close" aria-label="关闭弹窗">关闭</button></div><div id="dialog-body"></div></dialog>

@@ -4,6 +4,8 @@ import asyncio
 import copy
 import time
 
+from astrbot.api import logger
+
 from .card_assets import (
     CardAssets,
     CardImage,
@@ -63,6 +65,11 @@ CARD_ACTIONS = {
     ),
     "unbind": ({"card_id", "expected_revision"}, {"card_id", "expected_revision"}),
     "archive": ({"card_id", "expected_revision"}, {"card_id", "expected_revision"}),
+    "unarchive": ({"card_id", "expected_revision"}, {"card_id", "expected_revision"}),
+    "delete": (
+        {"card_id", "expected_revision", "confirm_name"},
+        {"card_id", "expected_revision", "confirm_name"},
+    ),
     "snapshots": ({"card_id"}, {"card_id"}),
     "snapshot": ({"card_id", "snapshot_id"}, {"card_id", "snapshot_id"}),
     "restore": (
@@ -260,8 +267,8 @@ class CardStudio:
         if kind not in ("card_image", "avatar"):
             raise StudioError("invalid_payload", "未知图片类型。")
         image = await asyncio.to_thread(prepare_image, raw, avatar=kind == "avatar")
-        asset_id = await asyncio.to_thread(self.storage.put_asset, image)
         async with self.studio.lock:
+            asset_id = await asyncio.to_thread(self.storage.put_asset, image)
             upload_id = self.storage.prepare_image(actor, asset_id, kind)
         return {
             "upload_id": upload_id,
@@ -299,9 +306,10 @@ class CardStudio:
             if not isinstance(action, str) or action not in CARD_ACTIONS:
                 raise StudioError("invalid_action", "未知角色卡操作。")
             check_payload(payload, *CARD_ACTIONS[action])
-            if action == "lock" and event is not None:
+            if action in ("lock", "delete") and event is not None:
                 raise StudioError(
-                    "manual_only", "模型不能锁定或解锁角色卡，请使用插件页面。"
+                    "manual_only",
+                    "锁定、解锁和永久删除角色卡需要真实用户在插件页面操作。",
                 )
             if action == "preview":
                 document = normalize_card(payload["card"])
@@ -350,6 +358,8 @@ class CardStudio:
                                 )
                             },
                             "name": c["document"]["data"]["name"],
+                            "description": c["document"]["data"]["description"][:240],
+                            "tags": c["document"]["data"]["tags"],
                             "character_version": c["document"]["data"][
                                 "character_version"
                             ],
@@ -377,7 +387,16 @@ class CardStudio:
                 actor,
                 card,
                 write=action not in ("get", "snapshots", "snapshot", "lock"),
-                allow_deleted=action in ("get", "snapshots", "snapshot", "restore"),
+                allow_deleted=action
+                in (
+                    "get",
+                    "snapshots",
+                    "snapshot",
+                    "restore",
+                    "unarchive",
+                    "delete",
+                    "lock",
+                ),
             )
             if action in ("get", "snapshots", "snapshot"):
                 if action == "snapshots":
@@ -489,7 +508,34 @@ class CardStudio:
                 await self.ensure_core_writable(actor, card, event)
                 card["deleted"] = 1
                 self.storage.save(card, card["revision"])
+            elif action == "unarchive":
+                if not card["deleted"]:
+                    raise StudioError("not_archived", "角色卡尚未归档。")
+                self.check_card_quota(actor)
+                await self.ensure_core_writable(actor, card, event)
+                card["deleted"] = 0
+                card = self.storage.save(card, card["revision"])
+                await self.sync(actor, card, event=event)
+            elif action == "delete":
+                if not card["deleted"]:
+                    raise StudioError("not_archived", "请先归档角色卡，再永久删除。")
+                if payload["confirm_name"] != card["document"]["data"]["name"]:
+                    raise StudioError(
+                        "confirmation_mismatch", "请输入完整角色名称以确认永久删除。"
+                    )
+                await self.ensure_core_writable(actor, card, event)
+                # Image resolution uses this lock before writing the shared cache.
+                async with self.images.lock:
+                    self.storage.delete(actor, card, card["revision"])
+                    pending = self.cleanup_assets_locked()
+                return {
+                    "card_id": card["card_id"],
+                    "deleted": True,
+                    "cleanup_pending": pending,
+                }
             elif action == "restore":
+                if card["deleted"]:
+                    self.check_card_quota(actor)
                 saved = self.storage.snapshot(card["card_id"], payload["snapshot_id"])[
                     "snapshot"
                 ]
@@ -507,6 +553,32 @@ class CardStudio:
             result = await self.detail(self.storage.get(card["card_id"]))
             self.reauthorize(actor, event)
             return result
+
+    def check_card_quota(self, actor):
+        settings = self.studio.settings()
+        all_cards = self.storage.list(Actor("", "", True))
+        if len(all_cards) >= settings.max_personas_total or (
+            not actor.admin
+            and sum(c["owner"] == actor.owner for c in all_cards)
+            >= settings.max_personas_per_user
+        ):
+            raise StudioError("limit_exceeded", "角色卡数量已达到配置上限。")
+
+    def cleanup_assets_locked(self):
+        try:
+            return self.storage.cleanup_assets()
+        except (OSError, StudioError, ValueError, TypeError, KeyError) as exc:
+            logger.warning(
+                "Character card image cleanup deferred (%s).", type(exc).__name__
+            )
+            return self.storage.connection.execute(
+                "SELECT COUNT(*) FROM card_asset_garbage"
+            ).fetchone()[0]
+
+    async def cleanup_assets(self):
+        """Called with the studio lock held, including after a restart."""
+        async with self.images.lock:
+            return self.cleanup_assets_locked()
 
     async def create(self, actor, payload, event):
         if ("card" in payload) == ("import_id" in payload):
@@ -530,13 +602,7 @@ class CardStudio:
         options = self.options(payload.get("options", {}))
         self.validate(document, options)
         settings = self.studio.settings()
-        all_cards = self.storage.list(Actor("", "", True))
-        if len(all_cards) >= settings.max_personas_total or (
-            not actor.admin
-            and sum(c["owner"] == actor.owner for c in all_cards)
-            >= settings.max_personas_per_user
-        ):
-            raise StudioError("limit_exceeded", "角色卡数量已达到配置上限。")
+        self.check_card_quota(actor)
         if payload.get("bind", True):
             await self.studio.check_quota(actor, settings)
             self.reauthorize(actor, event)
