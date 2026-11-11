@@ -37,9 +37,14 @@ from .domain import (
     validate_content,
     validate_id,
 )
+from .worldbook import MAX_SCAN_CHARS, MAX_SCAN_DEPTH, evaluate_book
 
 CARD_ACTIONS = {
     "preview": ({"card", "options"}, {"card"}),
+    "worldbook_preview": (
+        {"card", "prompt", "history", "username"},
+        {"card", "prompt"},
+    ),
     "list": ({"offset", "limit", "deleted"}, set()),
     "get": ({"card_id"}, {"card_id"}),
     "create": ({"card", "import_id", "options", "bind"}, set()),
@@ -328,6 +333,34 @@ class CardStudio:
                 options = self.options(payload.get("options", {}), original_options)
                 self.validate(document, options)
                 return {"document": document, "compiled": compile_card(document)}
+            if action == "worldbook_preview":
+                document = normalize_card(payload["card"])
+                prompt = payload["prompt"]
+                history = payload.get("history", [])
+                username = payload.get("username", "访客")
+                if not isinstance(prompt, str) or len(prompt) > MAX_SCAN_CHARS:
+                    raise StudioError(
+                        "invalid_payload", f"测试消息最多 {MAX_SCAN_CHARS} 字符。"
+                    )
+                if (
+                    not isinstance(history, list)
+                    or len(history) > MAX_SCAN_DEPTH
+                    or any(not isinstance(t, str) for t in history)
+                    or sum(map(len, history)) > MAX_SCAN_CHARS
+                ):
+                    raise StudioError(
+                        "invalid_payload",
+                        f"测试历史最多 {MAX_SCAN_DEPTH} 条、共 {MAX_SCAN_CHARS} 字符。",
+                    )
+                if not isinstance(username, str) or not 1 <= len(username) <= 255:
+                    raise StudioError("invalid_payload", "测试用户名须为 1～255 字符。")
+                data = document["data"]
+                return evaluate_book(
+                    data.get("character_book"),
+                    prompt,
+                    [{"role": "user", "content": t} for t in history],
+                    render=lambda text: render_macros(text, data["name"], username),
+                )
             if action == "list":
                 if type(payload.get("deleted", False)) is not bool:
                     raise StudioError("invalid_payload", "deleted 必须为布尔值。")
@@ -832,15 +865,27 @@ class CardStudio:
             def render(text):
                 return render_macros(text, data["name"], name)
 
+            book = evaluate_book(
+                data.get("character_book"), req.prompt, req.contexts, render=render
+            )
             prompt = compiled["system_prompt"]
             if compiled["literal_system_prompt"]:
                 original = persona_origin(card["document"])["persona"]["system_prompt"]
                 rendered_prompt = original + render(prompt[len(original) :])
             else:
                 rendered_prompt = render(prompt)
+            rendered_prompt = "\n\n".join(
+                part
+                for part in (book["before"], rendered_prompt, book["after"])
+                if part
+            )
             if prompt:
                 req.system_prompt = req.system_prompt.replace(
                     prompt, rendered_prompt, 1
+                )
+            elif book["before"] or book["after"]:
+                req.system_prompt = "\n\n".join(
+                    part for part in (req.system_prompt, rendered_prompt) if part
                 )
             examples = []
             for block in compiled["examples"]:

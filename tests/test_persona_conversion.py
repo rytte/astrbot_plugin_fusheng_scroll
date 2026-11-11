@@ -66,6 +66,39 @@ async def mutate(env, card, action="update", **payload):
     )
 
 
+@pytest.mark.parametrize("prompt", ["", "原文 {{char}} 与 {{user}}"])
+async def test_worldbook_preserves_literal_native_prompt_and_ignores_presets(
+    conversion, prompt
+):
+    env = conversion
+    await legacy(env, system_prompt=prompt, begin_dialogs=["白塔", "预设回答"])
+    card = await get_converted(env)
+    card = await mutate(
+        env,
+        card,
+        data={
+            "character_book": {
+                "entries": [
+                    {"constant": True, "content": "{{char}} 与 {{user}} 的本轮背景"},
+                    {"keys": ["白塔"], "content": "预设不应触发此条"},
+                ]
+            }
+        },
+    )
+    persona = env.manager.get_persona_v3_by_id(card["persona_id"])
+    req = ProviderRequest(
+        prompt="你好",
+        system_prompt="外部系统\n" + prompt,
+        contexts=copy.deepcopy(persona["_begin_dialogs_processed"]),
+    )
+    env.event.set_extra("_trace_persona_id", card["persona_id"])
+    await env.cards.apply_request(env.event, req)
+    assert "原有人格 与 user 的本轮背景" in req.system_prompt
+    assert "预设不应触发此条" not in req.system_prompt
+    assert req.system_prompt.startswith("外部系统\n" + prompt)
+    assert (await env.studio.current(card["persona_id"]))["system_prompt"] == prompt
+
+
 @pytest.mark.parametrize(
     "dialogs",
     [None, [], ["单条"], ["  首尾空白 \n{{char}}: 内嵌标记", "<START>\n原回答\n"]],

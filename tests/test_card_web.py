@@ -319,6 +319,316 @@ async def test_web_validates_malformed_payloads_and_preview_has_no_side_effect(w
     assert web.cards.storage.list(Actor("", "", True)) == []
 
 
+async def test_worldbook_preview_unsaved_draft_validation_and_no_side_effects(web):
+    document = new_card("爱莉")
+    document["data"]["character_book"] = {
+        "entries": [
+            {
+                "keys": ["白塔"],
+                "content": "{{char}} 认识 {{user}}",
+                "extensions": {"unknown": [1]},
+            }
+        ],
+        "extensions": {"custom": {"original": True}},
+    }
+    payload = {"card": document, "prompt": "去白塔", "username": "访客"}
+    response = await web.client.post(
+        PREFIX + "/action", json={"action": "worldbook_preview", "payload": payload}
+    )
+    assert response.status_code == 200, response.text
+    result = response.json()["data"]
+    assert result["entries"][0]["matched_keys"] == ["白塔"]
+    assert "爱莉 认识 访客" in result["after"]
+    assert web.cards.storage.list(Actor("", "", True)) == []
+    for patch in (
+        {"prompt": []},
+        {"history": "白塔"},
+        {"history": [None]},
+        {"history": ["x"] * 51},
+        {"username": []},
+        {"prompt": "x" * 32001},
+    ):
+        response = await web.client.post(
+            PREFIX + "/action",
+            json={"action": "worldbook_preview", "payload": {**payload, **patch}},
+        )
+        assert response.status_code == 400, response.text
+    web.identity["username"] = ""
+    response = await web.client.post(
+        PREFIX + "/action", json={"action": "worldbook_preview", "payload": payload}
+    )
+    assert response.status_code == 400
+
+
+async def test_worldbook_editor_end_to_end_in_browser(web, tmp_path):
+    """Exercise the shipped page against real APIs, with no external server/data."""
+    import shutil
+    from pathlib import Path
+    from urllib.parse import urlsplit
+
+    async_playwright = pytest.importorskip("playwright.async_api").async_playwright
+
+    executable = shutil.which("chromium") or shutil.which("google-chrome")
+    if not executable:
+        pytest.skip("No installed Chromium browser for editor integration test")
+    document = new_card("爱莉")
+    document["data"].update(
+        description="温柔的旅行者，喜欢探索白塔与山间的旧城。",
+        character_book={
+            "name": "白塔纪事",
+            "entries": [
+                {
+                    "name": "白塔法师协会",
+                    "keys": ["白塔", "法师协会"],
+                    "content": "白塔是法师协会的总部，{{char}} 曾在这里学习星象。",
+                    "enabled": True,
+                    "extensions": {"untouched": {"preserve": True}},
+                },
+                {
+                    "name": "角色与世界",
+                    "constant": True,
+                    "content": "故事发生在群山之间的旧王国。",
+                    "position": "before_char",
+                },
+                {
+                    "name": "时间法则",
+                    "constant": True,
+                    "content": "这条规则带有冷却时间。",
+                    "extensions": {"cooldown": 2},
+                },
+            ],
+            "extensions": {"other_app": [1, 2, 3]},
+        },
+    )
+    created = await web.client.post(
+        PREFIX + "/action", json={"action": "create", "payload": {"card": document}}
+    )
+    card = created.json()["data"]
+    bridge = """
+    window.AstrBotPluginView={
+      ready:async()=>{},onContext:fn=>fn({isDark:false}),
+      request:async(path,method='GET',body)=>{
+        const response=await fetch('/api'+path,{method,headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});
+        const result=await response.json();if(!response.ok)throw Error(result.message||'请求失败');return result.data;
+      },
+      apiGet:(path,params={})=>window.AstrBotPluginView.request('/'+path+'?'+new URLSearchParams(params)),
+      apiPost:(path,body)=>window.AstrBotPluginView.request('/'+path,'POST',body)
+    };
+    """
+    root = Path(__file__).parents[1] / "views" / "studio"
+    errors = []
+    async with async_playwright() as playwright:
+        browser = await playwright.chromium.launch(
+            executable_path=executable, headless=True, args=["--no-sandbox"]
+        )
+        try:
+            page = await browser.new_page(viewport={"width": 1280, "height": 1000})
+            page.on("pageerror", lambda error: errors.append(str(error)))
+
+            async def route_handler(route):
+                request = route.request
+                path = urlsplit(request.url).path
+                if path == "/api/plugin/page/bridge-sdk.js":
+                    await route.fulfill(
+                        body=bridge, content_type="application/javascript"
+                    )
+                elif path.startswith("/api/"):
+                    response = await web.client.request(
+                        request.method,
+                        PREFIX + request.url.split("/api", 1)[1],
+                        content=request.post_data,
+                        headers={"Content-Type": "application/json"},
+                    )
+                    await route.fulfill(
+                        status=response.status_code,
+                        body=response.content,
+                        content_type="application/json",
+                    )
+                elif path in ("/", "/app.js", "/app.css", "/worldbook.js"):
+                    file = root / ("index.html" if path == "/" else path[1:])
+                    await route.fulfill(
+                        body=file.read_bytes(),
+                        content_type={
+                            ".html": "text/html",
+                            ".js": "application/javascript",
+                            ".css": "text/css",
+                        }[file.suffix],
+                    )
+                else:
+                    await route.fulfill(status=404, body="Not found")
+
+            await page.route("http://studio.test/**", route_handler)
+            await page.goto("http://studio.test/")
+            await page.get_by_role("button", name="编辑角色：爱莉", exact=True).click()
+            await page.get_by_role("tab", name="世界书", exact=True).click()
+            await page.locator('[data-wb-test="test"]').fill("今天我们去白塔看看吧。")
+            await page.locator(
+                '#wb-result:has-text("爱莉 曾在这里学习星象")'
+            ).wait_for()
+            assert await page.locator('.wb-result-row:has-text("已注入")').count() == 2
+            assert "暂不支持" in await page.locator("#wb-result").inner_text()
+            await page.screenshot(
+                path=str(tmp_path / "worldbook-desktop.png"), full_page=True
+            )
+
+            # Chips preserve pending text on entry switches and during busy save.
+            await page.locator('[data-wb-key="keys"]').fill("星象")
+            await page.locator('[data-wb-select="1"]').click()
+            await page.locator('[data-wb-select="0"]').click()
+            assert (
+                await page.locator('.wb-key-editor .tag-chip:has-text("星象")').count()
+                == 1
+            )
+            await page.locator('[data-wb-key="keys"]').fill("星空")
+            await page.locator('[data-action="save"]').click()
+            await page.locator('#save-state:has-text("卡片已保存")').wait_for()
+            saved = (
+                await web.client.get(
+                    PREFIX + "/card", params={"card_id": card["card_id"]}
+                )
+            ).json()["data"]
+            book = saved["document"]["data"]["character_book"]
+            assert book["entries"][0]["keys"] == ["白塔", "法师协会", "星象", "星空"]
+            assert book["extensions"] == {"other_app": [1, 2, 3]}
+            assert book["entries"][0]["extensions"] == {"untouched": {"preserve": True}}
+            assert len(saved["snapshots"]) == 1
+
+            # New entries, IME/Enter chips, and a character budget recompute live.
+            await page.locator('[data-wb-action="add"]').click()
+            await page.locator('[data-wb-entry="name"]').fill("星之庭院")
+            await page.locator('[data-wb-key="keys"]').fill("花园")
+            await page.locator('[data-wb-key="keys"]').press("Enter")
+            await page.locator('[data-wb-key="keys"]').evaluate("""input=>{
+              const clipboardData=new DataTransfer();clipboardData.setData('text/plain','庭院\\n花园、星园');
+              input.dispatchEvent(new ClipboardEvent('paste',{bubbles:true,cancelable:true,clipboardData}));
+            }""")
+            assert (
+                await page.locator('.wb-key-editor .tag-chip:has-text("花园")').count()
+                == 1
+            )
+            assert (
+                await page.locator('.wb-key-editor .tag-chip:has-text("庭院")').count()
+                == 1
+            )
+            await page.locator('[data-wb-key="keys"]').evaluate("""input=>{
+              input.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));
+              input.value='星海';input.dispatchEvent(new InputEvent('input',{bubbles:true,isComposing:true}));
+              input.dispatchEvent(new KeyboardEvent('keydown',{bubbles:true,key:'Enter',isComposing:true}));
+            }""")
+            assert (
+                await page.locator('.wb-key-editor .tag-chip:has-text("星海")').count()
+                == 0
+            )
+            await page.locator('[data-wb-key="keys"]').evaluate(
+                "input=>input.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true}))"
+            )
+            await page.locator('[data-wb-key="keys"]').press("Enter")
+            assert (
+                await page.locator('.wb-key-editor .tag-chip:has-text("星海")').count()
+                == 1
+            )
+            await page.locator('[data-wb-entry="content"]').fill(
+                "爱莉与访客常在这里观察星星。"
+            )
+            await page.locator('[data-wb-test="test"]').fill("去花园看星星")
+            await page.locator('#wb-result:has-text("命中：花园")').wait_for()
+            await page.locator('[data-wb-book="max_chars"]').fill("1")
+            await page.locator('#wb-result:has-text("预算不足")').wait_for()
+            assert await page.locator('.wb-result-row:has-text("已注入")').count() == 0
+            await page.locator('[data-wb-book="max_chars"]').fill("4000")
+
+            # Invalid numerical edits are actionable and do not silently save defaults.
+            await page.locator('[data-wb-book="scan_depth"]').fill("51")
+            await page.locator('[data-action="save"]').click()
+            await page.locator('#notice-message:has-text("0～50")').wait_for()
+            await page.locator('[data-wb-book="scan_depth"]').fill("4")
+            await page.locator('[data-action="save"]').click()
+            await page.locator('#save-state:has-text("卡片已保存")').wait_for()
+            assert (
+                await page.locator('[data-wb-entry="name"]').input_value() == "星之庭院"
+            )
+            assert (
+                await page.locator('[data-wb-test="test"]').input_value()
+                == "去花园看星星"
+            )
+
+            # Mobile and dark mode fit the viewport; preview and editor remain usable.
+            await page.set_viewport_size({"width": 390, "height": 844})
+            await page.evaluate("document.documentElement.dataset.theme='dark'")
+            await page.locator('[data-wb-test="test"]').fill("去白塔看看")
+            await page.locator('#wb-result:has-text("命中：白塔")').wait_for()
+            assert await page.evaluate(
+                "document.documentElement.scrollWidth<=innerWidth"
+            )
+            await page.locator('[data-wb-select="0"]').click()
+            await page.locator('#wb-result:has-text("命中：白塔")').wait_for()
+            await page.locator("#notice-close").evaluate("button=>button.click()")
+            await page.screenshot(
+                path=str(tmp_path / "worldbook-mobile.png"), full_page=True
+            )
+            await page.set_viewport_size({"width": 320, "height": 700})
+            assert await page.evaluate(
+                "document.documentElement.scrollWidth<=innerWidth"
+            )
+
+            # Archive/lock read-only behavior allows testing but blocks all mutation.
+            latest = (
+                await web.client.get(
+                    PREFIX + "/card", params={"card_id": card["card_id"]}
+                )
+            ).json()["data"]
+            await web.cards.execute(
+                Actor("webui", "dashboard-admin", True),
+                "lock",
+                {
+                    "card_id": saved["card_id"],
+                    "expected_revision": latest["revision"],
+                    "locked": True,
+                },
+            )
+            await page.reload()
+            await page.get_by_role("button", name="编辑角色：爱莉", exact=True).click()
+            await page.get_by_role("tab", name="世界书", exact=True).click()
+            assert await page.locator('[data-wb-entry="content"]').is_disabled()
+            assert await page.locator('[data-wb-action="add"]').is_disabled()
+            assert await page.locator('[data-wb-test="test"]').is_enabled()
+            await page.locator('[data-wb-select="1"]').click()
+            assert await page.locator('[data-wb-entry="constant"]').is_disabled()
+
+            # A card with no imported book can create and save its first entry.
+            fresh = (
+                await web.client.post(
+                    PREFIX + "/action",
+                    json={"action": "create", "payload": {"card": new_card("新世界")}},
+                )
+            ).json()["data"]
+            await page.reload()
+            await page.get_by_role(
+                "button", name="编辑角色：新世界", exact=True
+            ).click()
+            await page.get_by_role("tab", name="世界书", exact=True).click()
+            assert await page.locator(".wb-empty").is_visible()
+            await page.locator('[data-wb-action="add"]').first.click()
+            await page.locator('[data-wb-entry="constant"]').select_option("true")
+            await page.locator('[data-wb-entry="content"]').fill("新世界的常驻背景")
+            await page.locator('#wb-result:has-text("新世界的常驻背景")').wait_for()
+            await page.locator('[data-action="save"]').click()
+            await page.locator('#save-state:has-text("卡片已保存")').wait_for()
+            fresh = (
+                await web.client.get(
+                    PREFIX + "/card", params={"card_id": fresh["card_id"]}
+                )
+            ).json()["data"]
+            assert fresh["document"]["data"]["character_book"]["extensions"] == {}
+            assert (
+                fresh["document"]["data"]["character_book"]["entries"][0]["content"]
+                == "新世界的常驻背景"
+            )
+            assert errors == []
+        finally:
+            await browser.close()
+
+
 @pytest.mark.parametrize("name", CARD_MODEL_TOOLS)
 async def test_new_model_tools_dispatch_fixed_action(env, name):
     plugin = PersonaStudioPlugin(env.context, env.config)

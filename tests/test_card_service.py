@@ -503,6 +503,9 @@ async def test_request_injection_is_excluded_by_actual_core_history_writer(cards
             "first_mes": "临时开场",
             "mes_example": "{{user}}: 示例\n{{char}}: 示例答",
             "post_history_instructions": "临时指令",
+            "character_book": {
+                "entries": [{"constant": True, "content": "世界书临时设定"}]
+            },
         },
     )
     cards.event.set_extra("_trace_persona_id", c["persona_id"])
@@ -516,6 +519,7 @@ async def test_request_injection_is_excluded_by_actual_core_history_writer(cards
         conversation=conversation,
     )
     await cards.cards.apply_request(cards.event, req)
+    assert "世界书临时设定" in req.system_prompt
     messages = [
         Message(role="system", content=req.system_prompt),
         *bind_checkpoint_messages(req.contexts),
@@ -542,6 +546,85 @@ async def test_request_injection_is_excluded_by_actual_core_history_writer(cards
     decoded = json.dumps(history, ensure_ascii=False)
     assert "临时" not in decoded and "示例" not in decoded
     assert "真实输入" in decoded and "真实回答" in decoded
+
+
+async def test_worldbook_runtime_matches_preview_without_persisting_or_leaking(cards):
+    c = await create(cards)
+    c = await change(
+        cards,
+        c,
+        data={
+            "mes_example": "{{user}}: 白塔\n{{char}}: 示例答",
+            "character_book": {
+                "scan_depth": 1,
+                "entries": [
+                    {
+                        "keys": ["白塔"],
+                        "content": "{{char}} 带 {{user}} 前往协会",
+                        "position": "before_char",
+                    },
+                    {
+                        "constant": True,
+                        "content": "始终在场的背景",
+                        "position": "after_char",
+                    },
+                    {"keys": ["别的地方"], "content": "不可串会话"},
+                ],
+            },
+        },
+    )
+    cards.event.set_extra("_trace_persona_id", c["persona_id"])
+    original_core = await cards.studio.current(c["persona_id"])
+    contexts = [{"role": "assistant", "content": [{"type": "text", "text": "去白塔"}]}]
+    req = ProviderRequest(
+        prompt="好",
+        system_prompt="核心前缀\n" + c["compiled"]["system_prompt"] + "\n其他插件",
+        contexts=copy.deepcopy(contexts),
+    )
+    await cards.cards.apply_request(cards.event, req)
+    preview = await cards.cards.execute(
+        cards.actor,
+        "worldbook_preview",
+        {
+            "card": c["document"],
+            "prompt": "好",
+            "history": ["去白塔"],
+            "username": "user",
+        },
+    )
+    assert (
+        req.system_prompt
+        == "核心前缀\n"
+        + "\n\n".join(
+            [
+                preview["before"],
+                c["compiled"]["system_prompt"].replace("{{user}}", "user"),
+                preview["after"],
+            ]
+        )
+        + "\n其他插件"
+    )
+    assert "爱莉 带 user" in req.system_prompt and "不可串会话" not in req.system_prompt
+    assert contexts == [
+        {"role": "assistant", "content": [{"type": "text", "text": "去白塔"}]}
+    ]
+    assert await cards.studio.current(c["persona_id"]) == original_core
+    assert cards.cards.storage.get(c["card_id"])["document"] == c["document"]
+    before = req.system_prompt
+    await cards.cards.apply_request(cards.event, req)
+    assert req.system_prompt == before
+    next_req = ProviderRequest(
+        prompt="你好", system_prompt=c["compiled"]["system_prompt"]
+    )
+    await cards.cards.apply_request(cards.event, next_req)
+    assert "前往协会" not in next_req.system_prompt  # example text must not trigger
+    assert "始终在场的背景" in next_req.system_prompt
+    c = await change(cards, c, action="archive")
+    archived = ProviderRequest(
+        prompt="白塔", system_prompt=c["compiled"]["system_prompt"]
+    )
+    await cards.cards.apply_request(cards.event, archived)
+    assert archived.system_prompt == c["compiled"]["system_prompt"]
 
 
 async def test_revoked_actor_cannot_create_during_core_quota_await(cards, monkeypatch):

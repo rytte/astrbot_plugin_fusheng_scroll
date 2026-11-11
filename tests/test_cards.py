@@ -243,7 +243,8 @@ def test_compilation_keeps_metadata_out_and_examples_separate():
     assert result["begin_dialogs"] == []
     assert [len(b) for b in result["examples"]] == [2, 1]
     assert "{{original}}" not in result["system_prompt"]
-    assert len(result["warnings"]) >= 3
+    assert len(result["warnings"]) >= 2
+    assert not any("未启用世界书" in warning for warning in result["warnings"])
     card["data"]["mes_example"] = "非标准对白"
     result = compile_card(card)
     assert not result["examples"] and "非标准对白" in result["system_prompt"]

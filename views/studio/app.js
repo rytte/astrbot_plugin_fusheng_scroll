@@ -1,9 +1,11 @@
+import {WorldbookEditor} from './worldbook.js';
+
 const bridge = window.AstrBotPluginView || window.AstrBotPluginPage;
 const $ = (selector) => document.querySelector(selector);
 const clone = (value) => JSON.parse(JSON.stringify(value));
 const escape = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'}[char]));
 const state = {items:[], activeCount:0, current:null, document:null, options:null, tab:'character', busy:false, raw:null, tagDraft:'', showKeys:false, avatar:null, avatarWarning:null, cardImage:null, cardImageWarning:null, pendingImages:{}, deleted:false, previewOpen:false, view:'collection'};
-const tabs = {character:'角色档案', dialogue:'对话设定', images:'图片与头像', more:'更多设置'};
+const tabs = {character:'角色档案', dialogue:'对话设定', worldbook:'世界书', images:'图片与头像', more:'更多设置'};
 const moreTabs = {astrbot:'AstrBot', history:'版本历史', source:'原始数据'};
 const iconPaths = {
   plus:'M12 5v14M5 12h14', upload:'M12 16V3m-5 5 5-5 5 5M4 16v5h16v-5',
@@ -15,12 +17,13 @@ const iconPaths = {
   alert:'M12 8v5m0 4h.01M2 21h20L12 3z',
   user:'M20 21v-2a6 6 0 0 0-6-6h-4a6 6 0 0 0-6 6v2M16 5a4 4 0 1 1-8 0 4 4 0 0 1 8 0',
   message:'M21 3H3v14h4v4l5-4h9zM7 8h10M7 12h6',
+  book:'M12 5v16M12 5C9 2 5 2 2 3v16c4-1 7 0 10 2 3-2 6-3 10-2V3c-3-1-7-1-10 2',
   image:'M3 3h18v18H3zM3 17l6-6 4 4 3-3 5 5M8 7h.01',
   settings:'M4 7h16M4 17h16M8 4v6M16 14v6',
   panel:'M3 3h18v18H3zM15 3v18', x:'m6 6 12 12M6 18 18 6',
 };
 const icon = name => `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${iconPaths[name]||iconPaths.user}"></path></svg>`;
-const tabIcons = {character:'user', dialogue:'message', images:'image', more:'settings'};
+const tabIcons = {character:'user', dialogue:'message', worldbook:'book', images:'image', more:'settings'};
 const activeTab = () => Object.hasOwn(moreTabs,state.tab)?'more':state.tab;
 function syncBadge(status) {
   const warning=['conflict','failed','missing','pending'].includes(status);
@@ -62,8 +65,8 @@ function notice(message, error=false) {
   noticeRemaining=error?8000:3000;
   resumeNotice();
 }
-function dirty() { return !!state.current && (Object.keys(state.pendingImages).length>0 || state.raw !== null || !!state.tagDraft.trim() || JSON.stringify(state.document)!==JSON.stringify(state.current.document) || JSON.stringify(state.options)!==JSON.stringify(state.current.options)); }
-function draftDocument() { try { return state.raw === null ? state.document : JSON.parse(state.raw); } catch { return state.document; } }
+function dirty() { return !!state.current && (Object.keys(state.pendingImages).length>0 || state.raw !== null || !!state.tagDraft.trim() || worldbook.hasDraft() || JSON.stringify(state.document)!==JSON.stringify(state.current.document) || JSON.stringify(state.options)!==JSON.stringify(state.current.options)); }
+function draftDocument() { try { return state.raw === null ? worldbook.draft(state.document) : JSON.parse(state.raw); } catch { return state.document; } }
 function versionChanged() { return !!state.current && draftDocument()?.data?.character_version!==state.current.document.data.character_version; }
 function field(label, key, value, {area=false, hint='', scope='data', rows=3, readonly=false}={}) {
   const attr=`data-scope="${scope}" data-field="${escape(key)}" ${readonly?'readonly':''}`;
@@ -136,6 +139,7 @@ async function busy(work) {
 }
 const get=(path,params={})=>bridge.apiGet(path,params);
 const post=(action,payload)=>bridge.apiPost('action',{action,payload});
+const worldbook=new WorldbookEditor(state,{escape,icon,post,changed:()=>{renderPreview();updateSavebar();},applyDisabled});
 const galleryImages = new Map();
 let imageObserver;
 function imageKey(card) { return `${card.card_id}:${card.revision}`; }
@@ -258,6 +262,7 @@ function avatarUrl() {
 }
 function avatarWarning() { return state.pendingImages.avatar || (state.pendingImages.card_image && followsCardImage())?null:state.avatarWarning; }
 function adopt(card) {
+  worldbook.reset(state.current?.card_id===card.card_id);
   state.current=card; state.document=clone(card.document); state.options=clone(card.options); state.raw=null; state.tagDraft=''; state.avatar=null; state.avatarWarning=null; state.cardImage=null; state.cardImageWarning=null; state.pendingImages={}; state.view='editor';
   void loadAvatar(card);
   void loadCardImage(card);
@@ -284,7 +289,9 @@ function render() {
 function applyDisabled() {
   if(!state.current)return;
   const blocked=state.current.locked || state.current.deleted || state.current.sync.core_locked;
-  if(blocked)document.querySelectorAll('#panel input,#panel textarea,#panel select').forEach(el=>el.disabled=true);
+  if(blocked)document.querySelectorAll('#panel input:not([data-wb-test]),#panel textarea:not([data-wb-test]),#panel select').forEach(el=>el.disabled=true);
+  document.querySelectorAll('[data-wb-action]:not([data-wb-action="test"])').forEach(el=>el.disabled=state.busy||blocked||(el.dataset.wbAction==='add'&&worldbook.entries().length>=500));
+  document.querySelectorAll('[data-wb-select],[data-wb-action="test"]').forEach(el=>el.disabled=state.busy);
   document.querySelectorAll('[data-add-greeting],[data-remove-greeting],[data-remove-tag],[data-action=archive],[data-action=bind],[data-action=unbind],[data-action=sync],[data-action=overwrite],[data-image-upload],[data-image-discard],[data-action=avatar-follow]').forEach(el=>el.disabled=state.busy || blocked);
   document.querySelectorAll('[data-action=restore],[data-action=unarchive],[data-action=delete]').forEach(el=>el.disabled=state.busy || !!state.current.locked || !!state.current.sync.core_locked);
   document.querySelectorAll('[data-action=lock]').forEach(el=>el.disabled=state.busy || (!!state.current.deleted&&!state.current.locked));
@@ -297,11 +304,11 @@ function renderPanel() {
   if(state.tab==='character') $('#panel').innerHTML=`<div class="panel-heading"><h3>角色档案</h3>${hint}</div><div class="form"><div class="two-columns identity-fields">${field('角色名称','name',d.name)}${field('角色版本','character_version',d.character_version,{hint:'修改版本并保存时留存快照'})}</div>${field('角色描述','description',d.description,{area:true,rows:5})}${field('性格与表达方式','personality',d.personality,{area:true})}${field('场景','scenario',d.scenario,{area:true})}<details class="metadata-fields"><summary>作者、标签与备注</summary><div class="form"><div class="two-columns">${field('作者','creator',d.creator)}${tagField()}</div>${field('创作者备注','creator_notes',d.creator_notes,{area:true,hint:'用于管理和导出，默认不进入模型上下文'})}</div></details></div>`;
   if(state.tab==='dialogue') $('#panel').innerHTML=`<div class="form">${field('角色指令','system_prompt',d.system_prompt,{area:true,hint:c.compiled.persona_import?'从 AstrBot 转入的原提示词原样保留；编辑后支持角色卡文本宏':'为空时使用默认角色指令；支持 {{char}}、{{user}} 和 {{original}}'})}${field('历史后指令','post_history_instructions',d.post_history_instructions,{area:true,hint:'作为本轮临时补充内容附在用户消息后，不修改已存历史'})}${field('示例对话','mes_example',d.mes_example,{area:true,rows:6,hint:c.compiled.persona_import?'原预设对话未编辑时按 AstrBot 原方式运行；编辑后使用角色卡示例格式':'支持 <START>、{{user}}: 和 {{char}}:；无法解析的格式保留为提示词原文'})}${field('开场白','first_mes',d.first_mes,{area:true,hint:'新对话的角色背景消息，不会重复写入聊天历史'})}${greetings('alternate_greetings','备用开场白')}${greetings('group_only_greetings','群聊开场白')}<label class="field"><span class="field-label">默认开场白</span><select data-scope="options-number" data-field="greeting_index">${[d.first_mes,...d.alternate_greetings].map((v,i)=>`<option value="${i}" ${state.options.greeting_index===i?'selected':''}>${i===0?'主开场白':`备用 ${i}`} · ${escape(v.slice(0,25)||'空白')}</option>`).join('')}</select><span class="field-help">有群聊专用开场白时使用群聊列表中的同一序号；超出序号时不注入。</span></label></div>`;
   if(state.tab==='images') renderImagePanel();
+  if(state.tab==='worldbook')worldbook.render();
   if(state.tab==='astrbot') renderAstrbot();
   if(state.tab==='history') $('#panel').innerHTML=`<p class="small muted">初始保存和角色版本变更时留档，长期保留。恢复不会产生额外快照。</p>${c.snapshots.map(s=>`<article class="snapshot"><div class="row"><h3>版本 ${escape(s.character_version||'未设置')}</h3><span class="small muted">${date(s.created_at)}</span></div><p>${({create:'初始创建',import:'初始导入',persona:'从 AstrBot 人格转换',version:'角色版本变更'})[s.reason]||escape(s.reason)}</p><div class="actions"><button data-snapshot="${escape(s.snapshot_id)}">查看与比较</button></div></article>`).join('')}`;
-  if(state.tab==='source') $('#panel').innerHTML=`<div class="form"><div class="notice">世界书、未知字段和扩展原样保存；本版不执行世界书引擎或酒馆扩展脚本。</div><label class="field"><span class="field-label">完整角色卡 JSON</span><textarea class="raw-editor" id="raw-json" spellcheck="false">${escape(state.raw??JSON.stringify(state.document,null,2))}</textarea><span class="field-help">此处编辑完整文档；保存时校验并统一为 V3。它不会修改绑定或权限信息。assets 中的 icon/main 可指定主头像；“图片与头像”中待保存的选择会在保存时应用。</span></label><div class="details-row"><span>卡片创建</span><span>${date(c.created_at)}</span></div><div class="details-row"><span>卡片最近保存</span><span>${date(c.updated_at)}</span></div>${d.creation_date?`<div class="details-row"><span>作者创建日期</span><span>${date(d.creation_date)}</span></div>`:''}${d.modification_date?`<div class="details-row"><span>作者修改日期</span><span>${date(d.modification_date)}</span></div>`:''}</div>`;
+  if(state.tab==='source') $('#panel').innerHTML=`<div class="form"><div class="notice">世界书按已支持的触发规则参与对话；未知字段和扩展原样保存，不执行酒馆脚本或正则。</div><label class="field"><span class="field-label">完整角色卡 JSON</span><textarea class="raw-editor" id="raw-json" spellcheck="false">${escape(state.raw??JSON.stringify(state.document,null,2))}</textarea><span class="field-help">此处编辑完整文档；保存时校验并统一为 V3。它不会修改绑定或权限信息。assets 中的 icon/main 可指定主头像；“图片与头像”中待保存的选择会在保存时应用。</span></label><div class="details-row"><span>卡片创建</span><span>${date(c.created_at)}</span></div><div class="details-row"><span>卡片最近保存</span><span>${date(c.updated_at)}</span></div>${d.creation_date?`<div class="details-row"><span>作者创建日期</span><span>${date(d.creation_date)}</span></div>`:''}${d.modification_date?`<div class="details-row"><span>作者修改日期</span><span>${date(d.modification_date)}</span></div>`:''}</div>`;
   if(Object.hasOwn(moreTabs,state.tab))$('#panel').insertAdjacentHTML('afterbegin',`<div class="subtabs" role="group" aria-label="更多设置分区">${Object.entries(moreTabs).map(([key,label])=>`<button data-tab="${key}" aria-pressed="${state.tab===key}">${label}</button>`).join('')}</div>`);
-  if(c.locked || c.deleted || c.sync.core_locked) $('#panel').querySelectorAll('input,textarea,select').forEach(el=>el.disabled=true);
   applyDisabled();
 }
 function renderImagePanel() {
@@ -344,7 +351,7 @@ function renderPreview() {
       const messages=[...(compiled.begin_dialogs||[]).map((content,i)=>({role:i%2?'assistant':'user',content})),...compiled.examples.flat().map(m=>({...m,content:replace(m.content)}))];
       const greetings=[d.first_mes,...d.alternate_greetings];
       const book=d.character_book?.entries?.length||0;
-      $('#preview').innerHTML=`<div class="preview-head"><h2>运行预览</h2><button class="quiet icon-button" data-action="preview" aria-label="收起运行预览">${icon('x')}</button></div><p class="small muted">实际编译结果 · 用户名示例：访客</p><div class="preview-columns"><section class="section"><div class="section-label">选定开场白（私聊）</div><div class="greeting">${escape(replace(greetings[options.greeting_index])||'未设置')}</div></section><section class="section"><div class="section-label">人格提示词</div><pre>${escape(prompt)}</pre></section><section class="section"><div class="section-label">示例与预设对话</div><pre>${escape(messages.map(m=>`${m.role}: ${m.content}`).join('\n')||'未设置')}</pre></section>${d.post_history_instructions?`<section class="section"><div class="section-label">历史后临时补充</div><pre>${escape(replace(d.post_history_instructions))}</pre></section>`:''}<section class="section"><div class="section-label">世界书</div><p class="small">${book?`${book} 条内容已保留`:'未附带世界书'}</p><p class="small muted">引擎未启用 · 不参与对话</p></section>${compiled.warnings.length?`<section class="section"><div class="section-label">适配说明</div>${compiled.warnings.map(w=>`<p class="small muted">${escape(w)}</p>`).join('')}</section>`:''}</div>`;
+      $('#preview').innerHTML=`<div class="preview-head"><h2>运行预览</h2><button class="quiet icon-button" data-action="preview" aria-label="收起运行预览">${icon('x')}</button></div><p class="small muted">实际编译结果 · 用户名示例：访客</p><div class="preview-columns"><section class="section"><div class="section-label">选定开场白（私聊）</div><div class="greeting">${escape(replace(greetings[options.greeting_index])||'未设置')}</div></section><section class="section"><div class="section-label">人格提示词</div><pre>${escape(prompt)}</pre></section><section class="section"><div class="section-label">示例与预设对话</div><pre>${escape(messages.map(m=>`${m.role}: ${m.content}`).join('\n')||'未设置')}</pre></section>${d.post_history_instructions?`<section class="section"><div class="section-label">历史后临时补充</div><pre>${escape(replace(d.post_history_instructions))}</pre></section>`:''}<section class="section"><div class="section-label">世界书</div><p class="small">${book?`${book} 条设定 · 按每轮对话触发`:'未附带世界书'}</p><p class="small muted">在“世界书”页签输入测试消息，查看实际注入内容。</p></section>${compiled.warnings.length?`<section class="section"><div class="section-label">适配说明</div>${compiled.warnings.map(w=>`<p class="small muted">${escape(w)}</p>`).join('')}</section>`:''}</div>`;
     }catch(error){if(revision===previewRevision)$('#preview').innerHTML=`<h2>运行预览</h2><p class="warning">${escape(error.message)}</p>`;}
   },250);
 }
@@ -363,6 +370,8 @@ function updateSavebar() {
 }
 async function save() {
   commitTagDraft();
+  worldbook.flush();
+  worldbook.validate();
   if(state.raw!==null) {
     const parsed=JSON.parse(state.raw);
     if(!parsed.data || typeof parsed.data.name!=='string')throw Error('角色卡必须包含 data.name。');
@@ -415,7 +424,7 @@ $('#upload').addEventListener('change',()=>busy(async()=>{
   const result=await bridge.upload('import',file);
   const d=result.card.data;
   const avatarHint=({ccdefault:result.has_image?'使用原始 PNG':'无随附 PNG',data:'来自 Data URL',https:'来自 HTTPS（打开时读取）',__asset:'来自 PNG 内嵌资源'})[result.avatar_source]||(result.avatar_source?'暂不支持的资源引用':'未声明主头像');
-  modal('导入预览',`<div class="details-row"><span>名称</span><span>${escape(d.name)}</span></div><div class="details-row"><span>格式 / 角色版本</span><span>V3 / ${escape(d.character_version||'未设置')}</span></div><div class="details-row"><span>主头像</span><span>${escape(avatarHint)}</span></div><div class="details-row"><span>原始 PNG</span><span>${result.has_image?'已保留':'未附带'}</span></div>${result.avatar_warning?`<p class="small warning">${escape(result.avatar_warning)}</p>`:''}<div class="details-row"><span>世界书</span><span>${d.character_book?.entries?.length||0} 条 · 仅保留</span></div><p class="small muted">V2 输入统一转换为 V3，保留角色版本。</p><div class="section">${result.compiled.warnings.map(w=>`<p class="small warning">${escape(w)}</p>`).join('')}</div><div class="dialog-footer">${state.current&&!state.current.locked&&!state.current.deleted?`<button data-action="import-update" data-import="${result.import_id}">更新当前「${escape(state.current.document.data.name)}」</button>`:''}<button data-action="import-create" data-import="${result.import_id}" class="primary">导入为新卡并绑定人格</button></div>`);
+  modal('导入预览',`<div class="details-row"><span>名称</span><span>${escape(d.name)}</span></div><div class="details-row"><span>格式 / 角色版本</span><span>V3 / ${escape(d.character_version||'未设置')}</span></div><div class="details-row"><span>主头像</span><span>${escape(avatarHint)}</span></div><div class="details-row"><span>原始 PNG</span><span>${result.has_image?'已保留':'未附带'}</span></div>${result.avatar_warning?`<p class="small warning">${escape(result.avatar_warning)}</p>`:''}<div class="details-row"><span>世界书</span><span>${d.character_book?.entries?.length||0} 条 · 支持关键词与常驻触发</span></div><p class="small muted">V2 输入统一转换为 V3，保留角色版本。</p><div class="section">${result.compiled.warnings.map(w=>`<p class="small warning">${escape(w)}</p>`).join('')}</div><div class="dialog-footer">${state.current&&!state.current.locked&&!state.current.deleted?`<button data-action="import-update" data-import="${result.import_id}">更新当前「${escape(state.current.document.data.name)}」</button>`:''}<button data-action="import-create" data-import="${result.import_id}" class="primary">导入为新卡并绑定人格</button></div>`);
 }));
 $('#image-upload').addEventListener('change',()=>busy(async()=>{
   const input=$('#image-upload'), file=input.files[0], kind=input.dataset.kind;
@@ -439,11 +448,13 @@ function handleTagInput(input) {
   if(!composingTags&&/[、,，\r\n]/.test(input.value))commitTagDraft();
   else{updateTagControl();updateSavebar();}
 }
-document.addEventListener('compositionstart',event=>{if(event.target.id==='tag-input')composingTags=true;});
+document.addEventListener('compositionstart',event=>{if(worldbook.composition(event))return;if(event.target.id==='tag-input')composingTags=true;});
 document.addEventListener('compositionend',event=>{
+  if(worldbook.composition(event))return;
   if(event.target.id==='tag-input'){composingTags=false;handleTagInput(event.target);}
 });
 document.addEventListener('paste',event=>{
+  if(worldbook.paste(event))return;
   if(event.target.id!=='tag-input'||!tagsEditable()||state.busy)return;
   const text=event.clipboardData?.getData('text/plain');
   if(!text||!/[、,，\r\n]/.test(text))return;
@@ -459,6 +470,7 @@ document.addEventListener('input',event=>{
   const el=event.target;
   if(el.id==='delete-name'){updateDeleteControl();return;}
   if(!state.current)return;
+  try{if(worldbook.input(event))return;}catch(error){notice(error.message,true);return;}
   if(el.id==='tag-input'){handleTagInput(el);return;}
   if(el.id==='raw-json'){state.raw=el.value;renderPreview();updateSavebar();return;}
   if(el.dataset.greeting){state.document.data[el.dataset.greeting][Number(el.dataset.index)]=el.value;}
@@ -481,6 +493,7 @@ document.addEventListener('click',event=>{
   const button=event.target.closest('button');if(!button)return;
   if(button.dataset.confirm){$('#confirm-dialog').close(button.dataset.confirm);return;}
   if(state.busy)return;
+  if(button.dataset.wbAction||button.dataset.wbSelect!==undefined){try{worldbook.click(button);}catch(error){notice(error.message,true);}return;}
   if(button.dataset.removeTag!==undefined){removeTag(Number(button.dataset.removeTag));return;}
   if(button.dataset.action==='add-tag'){commitTagDraft();$('#tag-input')?.focus();return;}
   if(button.dataset.action==='new-empty'){$('#new-button').click();return;}
@@ -506,6 +519,7 @@ document.addEventListener('click',event=>{
   }
   if(button.dataset.card){busy(async()=>{if(await requireClean())await openCard(button.dataset.card);});return;}
   if(button.dataset.tab){
+    worldbook.flush();
     const nextTab=button.dataset.tab==='more'?'astrbot':button.dataset.tab;
     const focusTab=()=>document.querySelector(`.tabs [data-tab="${activeTab()}"]`).focus({preventScroll:true});
     if(state.raw!==null && nextTab!=='source'){
@@ -569,6 +583,7 @@ document.addEventListener('click',event=>{
 });
 window.addEventListener('beforeunload',event=>{if(dirty()){event.preventDefault();event.returnValue='';}});
 document.addEventListener('keydown',event=>{
+  if(worldbook.keydown(event))return;
   if(event.target.id==='tag-input'){
     if(event.isComposing||composingTags||event.keyCode===229||!tagsEditable()||state.busy)return;
     if(['Enter',',','，','、'].includes(event.key)){event.preventDefault();commitTagDraft();}

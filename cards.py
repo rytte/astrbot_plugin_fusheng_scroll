@@ -1,7 +1,7 @@
 """Character Card V3 documents with V2 import compatibility.
 
-The document is the source of truth. Compilation never rewrites its text or
-executes extensions, macros, asset URLs, regular expressions or world books.
+The document is the source of truth. Compilation never rewrites its text.
+World books run separately against each request; scripts and regex never execute.
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ import struct
 import zlib
 
 from .domain import StudioError, canonical
+from .worldbook import book_warnings
 
 MAX_CARD_BYTES = 2 * 1024 * 1024
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
@@ -460,8 +461,7 @@ def compile_card(card: dict) -> dict:
         prompt += "\n\n## 示例对话原文\n" + data["mes_example"]
         examples = []
         warnings.append("示例对话包含非标准段落，已保留原文并放入人格提示词。")
-    if data.get("character_book"):
-        warnings.append("世界书内容已保存；本版未启用世界书引擎。")
+    warnings.extend(book_warnings(data.get("character_book")))
     if any(key != PERSONA_EXTENSION for key in data.get("extensions", {})) or (
         data.get("extensions") and not origin
     ):
