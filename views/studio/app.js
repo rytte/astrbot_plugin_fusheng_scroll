@@ -174,7 +174,7 @@ function observeGallery() {
 }
 function collectionScope() {
   document.querySelectorAll('[data-collection]').forEach(button=>button.setAttribute('aria-pressed',String((button.dataset.collection==='archived')===state.deleted)));
-  $('#collection-title').textContent=state.deleted?'故事留在这里。':'你的角色，各有故事。';
+  $('#collection-title').textContent=state.deleted?'旧卷暂藏，来日续章。':'一笔一世界，一卷一浮生。';
 }
 async function showCollection() {
   clearTimeout(previewTimer); ++previewRevision;

@@ -65,10 +65,12 @@ small, .small { font-size: 12px; }
 .archive-banner p { margin-top: 5px; }
 #delete-name { margin-top: 4px; }
 .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.brand { display: flex; align-items: center; gap: 13px; min-width: 0; }
 .brand-mark { display: block; width: 52px; height: 52px; flex-shrink: 0; object-fit: contain; }
-.brand h1 { font-size: 19px; line-height: 1.4; }
-.brand p { color: var(--muted); font-size: 12px; margin-top: 3px; }
+.brand-copy { min-width: 0; }
+.brand h1 { font-family: "Noto Serif CJK SC", "Noto Serif SC", "Source Han Serif SC", "Songti SC", "STSong", "SimSun", serif; font-size: 23px; font-weight: 600; line-height: 1.3; letter-spacing: .16em; white-space: nowrap; color: light-dark(#49383f, #ebded5); }
+.brand h1 span { color: light-dark(#a65343, #e0a18a); }
+.brand p { color: var(--muted); font-size: 11px; line-height: 1.6; letter-spacing: .1em; margin-top: 4px; }
 .eyebrow { color: var(--accent); letter-spacing: 2.2px; font-size: 11px; font-weight: 500; }
 .collection { max-width: 1440px; margin: 0 auto; padding: 28px 40px 24px; min-height: 100dvh; display: flex; flex-direction: column; }
 .collection-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 24px; }
