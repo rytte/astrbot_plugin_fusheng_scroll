@@ -3,13 +3,13 @@
     "description": "允许在群聊中使用",
     "type": "bool",
     "default": true,
-    "hint": "开启后，模型工具与 /ps 命令可在群聊中使用，权限规则与私聊一致。"
+    "hint": "开启后，模型工具与 /fs 命令可在群聊中使用，权限规则与私聊一致。"
   },
   "whitelist": {
     "description": "人格管理白名单",
     "type": "template_list",
     "default": [],
-    "hint": "管理员以外的用户使用需要填写用户ID。用户只能管理自己通过本插件新建的人格。管理员可在私聊或已开放的群聊使用 /ps whitelist add/remove <用户ID> 维护当前平台实例的白名单。",
+    "hint": "管理员以外的用户使用需要填写用户ID。用户只能管理自己通过本插件新建的人格。管理员可在私聊或已开放的群聊使用 /fs whitelist add/remove <用户ID> 维护当前平台实例的白名单。",
     "templates": {
       "user": {
         "name": "授权用户",

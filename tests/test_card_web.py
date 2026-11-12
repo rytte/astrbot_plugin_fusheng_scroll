@@ -9,13 +9,13 @@ from astrbot.api.web import PluginRequest, bind_request_context
 from astrbot.core.agent.run_context import ContextWrapper
 from astrbot.core.agent.tool import FunctionTool
 from astrbot.core.astr_agent_tool_exec import FunctionToolExecutor
-from astrbot_plugin_persona_studio.card_service import CardStudio
-from astrbot_plugin_persona_studio.card_tools import (
+from astrbot_plugin_fusheng_scroll.card_service import CardStudio
+from astrbot_plugin_fusheng_scroll.card_tools import (
     CARD_MODEL_TOOLS,
     card_tool_parameters,
 )
-from astrbot_plugin_persona_studio.card_web import PREFIX, CardWeb
-from astrbot_plugin_persona_studio.cards import (
+from astrbot_plugin_fusheng_scroll.card_web import LEGACY_PREFIX, PREFIX, CardWeb
+from astrbot_plugin_fusheng_scroll.cards import (
     _chunk,
     blank_png,
     export_png,
@@ -23,8 +23,8 @@ from astrbot_plugin_persona_studio.cards import (
     new_card,
     png_chunks,
 )
-from astrbot_plugin_persona_studio.domain import Actor, canonical
-from astrbot_plugin_persona_studio.main import PersonaStudioPlugin
+from astrbot_plugin_fusheng_scroll.domain import Actor, canonical
+from astrbot_plugin_fusheng_scroll.main import PersonaStudioPlugin
 from fastapi import FastAPI, Request
 
 
@@ -57,6 +57,20 @@ async def web(env):
         )
     api.unregister()
     assert context.registered_web_apis == []
+
+
+@pytest.mark.parametrize("prefix", [PREFIX, LEGACY_PREFIX])
+async def test_renamed_and_legacy_api_share_data_and_authentication(web, prefix):
+    response = await web.client.get(prefix + "/cards")
+    assert response.status_code == 200
+    card = response.json()["data"]["items"][0]
+    response = await web.client.get(
+        PREFIX + "/card", params={"card_id": card["card_id"]}
+    )
+    assert response.status_code == 200
+    assert response.json()["data"]["card_id"] == card["card_id"]
+    web.identity["username"] = ""
+    assert (await web.client.get(prefix + "/cards")).status_code == 400
 
 
 async def test_authenticated_web_full_import_edit_history_export(web):
@@ -444,7 +458,7 @@ async def test_worldbook_editor_end_to_end_in_browser(web, tmp_path):
                         body=response.content,
                         content_type="application/json",
                     )
-                elif path in ("/", "/app.js", "/app.css", "/worldbook.js"):
+                elif path in ("/", "/app.js", "/app.css", "/worldbook.js", "/logo.png"):
                     file = root / ("index.html" if path == "/" else path[1:])
                     await route.fulfill(
                         body=file.read_bytes(),
@@ -452,6 +466,7 @@ async def test_worldbook_editor_end_to_end_in_browser(web, tmp_path):
                             ".html": "text/html",
                             ".js": "application/javascript",
                             ".css": "text/css",
+                            ".png": "image/png",
                         }[file.suffix],
                     )
                 else:

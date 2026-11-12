@@ -11,9 +11,9 @@ from astrbot.core.agent.tool import FunctionTool
 from astrbot.core.astr_agent_tool_exec import FunctionToolExecutor
 from astrbot.core.db.po import Conversation
 from astrbot.core.provider.entities import ProviderRequest
-from astrbot_plugin_persona_studio.domain import MODEL_TOOLS, Settings
-from astrbot_plugin_persona_studio.main import PersonaStudioPlugin
-from astrbot_plugin_persona_studio.tool_schema import tool_parameters
+from astrbot_plugin_fusheng_scroll.domain import MODEL_TOOLS, Settings
+from astrbot_plugin_fusheng_scroll.main import PersonaStudioPlugin
+from astrbot_plugin_fusheng_scroll.tool_schema import tool_parameters
 
 
 @pytest.mark.parametrize("path", ["main", "handoff", "full"])
@@ -138,11 +138,18 @@ async def test_revocation_during_quota_check_prevents_create(env, monkeypatch):
 async def test_plugin_initializes_without_core_patch(env, tmp_path, monkeypatch):
     from astrbot.api.star import StarTools
 
-    monkeypatch.setattr(StarTools, "get_data_dir", lambda name: tmp_path / "plugin")
+    data_dirs = []
+
+    def data_dir(name):
+        data_dirs.append(name)
+        return tmp_path / "plugin"
+
+    monkeypatch.setattr(StarTools, "get_data_dir", data_dir)
     plugin = PersonaStudioPlugin(env.context, env.config)
     await plugin.initialize()
     try:
         assert plugin.studio.manager is env.manager
+        assert data_dirs == ["astrbot_plugin_persona_studio"]
         assert plugin.maintenance_task is not None
         for name in MODEL_TOOLS:
             tool = env.tools.get_func(name)
@@ -159,7 +166,7 @@ async def test_plugin_tools_and_command_dispatch(created):
     plugin = PersonaStudioPlugin(created.context, created.config)
     plugin.studio = created.studio
     assert '"ok": true' in await plugin.persona_list(created.event)
-    message = created.native_event(text="/ps lock alice")
+    message = created.native_event(text="/fs lock alice")
     replies = [reply async for reply in plugin.persona(message, "lock alice")]
     assert len(replies) == 1
     assert (
@@ -185,7 +192,7 @@ async def test_individual_tools_dispatch_fixed_operations(created, name):
         description="Test",
         parameters=parameters,
         handler=getattr(plugin, name),
-        handler_module_path="astrbot_plugin_persona_studio.main",
+        handler_module_path="astrbot_plugin_fusheng_scroll.main",
     )
     run_context = ContextWrapper(
         context=SimpleNamespace(context=created.context, event=created.event)
@@ -298,18 +305,15 @@ async def test_plugin_lifecycle_persists_metadata(env, tmp_path, monkeypatch):
         await plugin.terminate()
 
 
-@pytest.mark.parametrize(
-    "text,arguments", [("/ps lock alice", "lock alice"), ("/ps", "")]
-)
+@pytest.mark.parametrize("command", ["fs", "浮生"])
+@pytest.mark.parametrize("arguments", ["lock alice", ""])
 async def test_native_command_filter_preserves_greedy_arguments(
-    created, text, arguments
+    created, command, arguments, persona_command_filter
 ):
-    from astrbot.core.star.filter.command import CommandFilter
-
     plugin = PersonaStudioPlugin(created.context, created.config)
     plugin.studio = created.studio
-    handler = SimpleNamespace(handler=PersonaStudioPlugin.persona)
-    command_filter = CommandFilter("ps", handler_md=handler)
+    command_filter = persona_command_filter
+    text = f"/{command} {arguments}".rstrip()
     event = created.native_event(text=text)
     event.message_str = text[1:]
     event.is_at_or_wake_command = True
@@ -320,11 +324,18 @@ async def test_native_command_filter_preserves_greedy_arguments(
     assert len(replies) == 1
     record = created.storage.records("alice")[0]
     assert record["locked"] == int(bool(arguments))
+    if not arguments:
+        assert "浮生绘卷" in replies[0].chain[0].text
+        assert "/fs lock" in replies[0].chain[0].text
+        assert "/浮生" in replies[0].chain[0].text
+        assert "/ps" not in replies[0].chain[0].text
 
 
-async def test_native_command_can_lock_id_with_repeated_spaces(created):
-    from astrbot.core.star.filter.command import CommandFilter
-
+@pytest.mark.parametrize("command", ["fs", "浮生"])
+@pytest.mark.parametrize("prefix", ["/", "!"])
+async def test_native_command_can_lock_id_with_repeated_spaces(
+    created, command, prefix, persona_command_filter
+):
     result = await created.studio.execute(
         created.event,
         "manage",
@@ -334,12 +345,11 @@ async def test_native_command_can_lock_id_with_repeated_spaces(created):
     assert result["ok"]
     plugin = PersonaStudioPlugin(created.context, created.config)
     plugin.studio = created.studio
-    event = created.native_event(text="/ps lock with  spaces")
-    event.message_str = "ps lock with  spaces"
+    created.core_config["wake_prefix"] = [prefix]
+    event = created.native_event(text=f"{prefix}{command} lock with  spaces")
+    event.message_str = f"{command} lock with  spaces"
     event.is_at_or_wake_command = True
-    command_filter = CommandFilter(
-        "ps", handler_md=SimpleNamespace(handler=PersonaStudioPlugin.persona)
-    )
+    command_filter = persona_command_filter
     assert command_filter.filter(event, created.core_config)
     replies = [
         reply
@@ -349,14 +359,23 @@ async def test_native_command_can_lock_id_with_repeated_spaces(created):
     assert created.storage.records("with  spaces")[0]["locked"] == 1
 
 
-@pytest.mark.parametrize("text", ["/persona lock alice", "/persona unlock alice"])
-async def test_old_command_is_not_recognized(created, text):
-    from astrbot.core.star.filter.command import CommandFilter
-
+@pytest.mark.parametrize(
+    "text",
+    [
+        "/persona lock alice",
+        "/persona unlock alice",
+        "/fsx lock alice",
+        "/浮生绘卷 lock alice",
+        "/ps",
+        "/ps lock alice",
+        "/ps unlock alice",
+        "/ps whitelist add user",
+        "/ps whitelist remove user",
+    ],
+)
+async def test_other_commands_are_not_recognized(created, text, persona_command_filter):
     event = created.native_event(text=text)
     event.message_str = text[1:]
     event.is_at_or_wake_command = True
-    command_filter = CommandFilter(
-        "ps", handler_md=SimpleNamespace(handler=PersonaStudioPlugin.persona)
-    )
+    command_filter = persona_command_filter
     assert not command_filter.filter(event, created.core_config)

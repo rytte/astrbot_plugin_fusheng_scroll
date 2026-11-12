@@ -10,6 +10,7 @@ from astrbot.api.event import MessageChain
 from astrbot.api.message_components import File, Image, Node, Nodes, Plain
 from astrbot.core.utils.astrbot_path import get_astrbot_temp_path
 
+from .branding import PLUGIN_NAME
 from .domain import StudioError, identify, view_options
 from .templates import content_html, metadata_fields, overview_html
 
@@ -213,7 +214,7 @@ def forward_message(event, result: dict, content: str) -> tuple[MessageChain, in
             heading = f"{title}（{index}/{len(chunks)}）" if len(chunks) > 1 else title
             nodes.append(
                 Node(
-                    name="人格工坊",
+                    name="浮生绘卷",
                     uin=str(bot_id),
                     content=[Plain(f"{heading}\n\n{chunk}")],
                 )
@@ -407,7 +408,7 @@ async def present(
                 for image in images
             ]
         elif format == "markdown":
-            directory = Path(get_astrbot_temp_path()) / "astrbot_plugin_persona_studio"
+            directory = Path(get_astrbot_temp_path()) / PLUGIN_NAME
             directory.mkdir(parents=True, exist_ok=True)
             with tempfile.NamedTemporaryFile(
                 mode="w",

@@ -1,14 +1,12 @@
 import json
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 from astrbot.api.platform import MessageType
 from astrbot.core.event_bus import UNIQUE_SESSION_ID_BUILDERS
-from astrbot.core.star.filter.command import CommandFilter
-from astrbot_plugin_persona_studio.domain import Settings, StudioError
-from astrbot_plugin_persona_studio.main import PersonaStudioPlugin
+from astrbot_plugin_fusheng_scroll.domain import Settings, StudioError
+from astrbot_plugin_fusheng_scroll.main import PersonaStudioPlugin
 
 
 @pytest.fixture
@@ -60,7 +58,7 @@ async def test_groups_rejected_when_disabled(created, family, action, payload):
 
 @pytest.mark.parametrize("family", ["manage", "versions", "protect"])
 async def test_groups_enabled_by_default(created, family):
-    event = created.native_event("admin", admin=True, group=True, text="/ps lock alice")
+    event = created.native_event("admin", admin=True, group=True, text="/fs lock alice")
     action = "lock" if family == "protect" else "list"
     payload = {} if family == "manage" else {"persona_id": "alice"}
     response = await created.studio.execute(event, family, action, payload)
@@ -222,7 +220,7 @@ async def test_group_switch_does_not_create_or_override_forced_conversations(
     )
     assert result["error"]["code"] == "no_current_conversation"
     monkeypatch.setattr(
-        "astrbot_plugin_persona_studio.service.sp.get_async",
+        "astrbot_plugin_fusheng_scroll.service.sp.get_async",
         AsyncMock(return_value={"persona_id": "forced"}),
     )
     result = await env.studio.execute(
@@ -231,15 +229,16 @@ async def test_group_switch_does_not_create_or_override_forced_conversations(
     assert result["error"]["code"] == "forced_persona"
 
 
-async def test_group_native_lock_commands_keep_write_protection(group_env):
+@pytest.mark.parametrize("command", ["fs", "浮生"])
+async def test_group_native_lock_commands_keep_write_protection(
+    group_env, command, persona_command_filter
+):
     env = group_env
     plugin = PersonaStudioPlugin(env.context, env.config)
     plugin.studio = env.studio
-    command_filter = CommandFilter(
-        "ps", handler_md=SimpleNamespace(handler=PersonaStudioPlugin.persona)
-    )
+    command_filter = persona_command_filter
     for action in ("lock", "unlock"):
-        event = env.native_event(group=True, text=f"/ps {action} alice")
+        event = env.native_event(group=True, text=f"/{command} {action} alice")
         event.message_str = event.message_obj.message_str[1:]
         event.is_at_or_wake_command = True
         assert command_filter.filter(event, env.core_config)
@@ -263,7 +262,7 @@ async def test_group_native_lock_commands_keep_write_protection(group_env):
 
 async def test_group_commands_still_require_direct_user_messages(group_env):
     env = group_env
-    event = env.native_event(group=True, text="/ps lock alice")
+    event = env.native_event(group=True, text="/fs lock alice")
     event.message_obj.raw_message = None
     result = await env.studio.execute(event, "protect", "lock", {"persona_id": "alice"})
     assert result["error"]["code"] == "real_command_only"

@@ -1,6 +1,7 @@
-name: astrbot_plugin_persona_studio
-display_name: 人格工坊
+name: astrbot_plugin_fusheng_scroll
+display_name: 浮生绘卷
 desc: 支持 Character Card V3、V2 导入兼容、角色卡管理页面、角色版本快照与 AstrBot 人格同步，保留人格管理、白名单和锁定。
 version: 0.2.0
 author: rytte
+repo: https://github.com/rytte/astrbot_plugin_fusheng_scroll
 astrbot_version: ">=4.29.3,<5"

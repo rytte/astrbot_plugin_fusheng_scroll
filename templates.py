@@ -131,9 +131,9 @@ def header_html(result: dict, kind: str, *, include_metadata: bool = True) -> st
     version = f"{'历史快照' if snapshot else '当前版本'} · {revision}"
     locked = result.get("locked", False)
     return (
-        '<header class="persona-header"><div class="masthead"><span class="brand-mark">PS</span>'
-        '<div><div class="brand-name">人格工坊</div>'
-        '<div class="brand-subtitle">PERSONA STUDIO</div></div></div>'
+        '<header class="persona-header"><div class="masthead"><span class="brand-mark">FS</span>'
+        '<div><div class="brand-name">浮生绘卷</div>'
+        '<div class="brand-subtitle">FUSHENG SCROLL</div></div></div>'
         f'<div class="hero"><div class="eyebrow">{kind}</div><h1>{persona_id}</h1>'
         + (
             f'<div class="hero-meta"><span class="pill">{html.escape(version)}</span>'
@@ -248,7 +248,7 @@ def overview_html(result: dict, width: int) -> str:
         + "".join(capabilities)
         + "</section>"
         + '<div class="fine-print">锁定仅约束本插件；查看与切换不受锁定影响。工具配置不代表执行授权。</div>'
-        + '<footer class="footer"><span class="footer-brand">PERSONA STUDIO</span><span>人格档案 · 独立展示</span></footer></main>'
+        + '<footer class="footer"><span class="footer-brand">FUSHENG SCROLL</span><span>人格档案 · 独立展示</span></footer></main>'
     )
     return document(body, width)
 
@@ -311,6 +311,6 @@ def content_html(result: dict, width: int) -> str:
         + '<div class="content-card"><div class="flow-window"><div class="flow">'
         + "".join(sections)
         + "</div></div></div>"
-        + '<footer class="footer"><span class="footer-brand">PERSONA STUDIO</span><span data-page-number>正文</span></footer></main>'
+        + '<footer class="footer"><span class="footer-brand">FUSHENG SCROLL</span><span data-page-number>正文</span></footer></main>'
     )
     return document(body, width)

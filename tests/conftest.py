@@ -1,3 +1,4 @@
+import importlib.util
 import os
 import sys
 import tempfile
@@ -11,7 +12,35 @@ PLUGIN = Path(__file__).resolve().parents[1]
 SOURCE = Path(os.environ.get("ASTRBOT_SOURCE", PLUGIN.parent / "AstrBot"))
 sys.path.insert(0, str(PLUGIN.parent))
 sys.path.insert(0, str(SOURCE))
-os.environ["ASTRBOT_ROOT"] = tempfile.mkdtemp(prefix="persona-studio-tests-")
+os.environ["ASTRBOT_ROOT"] = tempfile.mkdtemp(prefix="fusheng-scroll-tests-")
+
+# Import the plugin under its published name even in an older checkout directory.
+spec = importlib.util.spec_from_file_location(
+    "astrbot_plugin_fusheng_scroll",
+    PLUGIN / "__init__.py",
+    submodule_search_locations=[str(PLUGIN)],
+)
+plugin_module = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = plugin_module
+spec.loader.exec_module(plugin_module)
+
+
+@pytest.fixture
+def persona_command_filter():
+    from astrbot.core.star.filter.command import CommandFilter
+    from astrbot.core.star.star_handler import star_handlers_registry
+    from astrbot_plugin_fusheng_scroll.main import PersonaStudioPlugin
+
+    handler = PersonaStudioPlugin.persona
+    metadata = star_handlers_registry.get_handler_by_full_name(
+        f"{handler.__module__}_{handler.__name__}"
+    )
+    command_filter = next(
+        item for item in metadata.event_filters if isinstance(item, CommandFilter)
+    )
+    assert command_filter.command_name == "fs"
+    assert command_filter.alias == {"浮生"}
+    return command_filter
 
 
 def native_event(
@@ -49,10 +78,10 @@ async def env(tmp_path, monkeypatch):
     from astrbot.core.persona_mgr import PersonaManager
     from astrbot.core.provider.func_tool_manager import FunctionToolManager
     from astrbot.core.star.context import Context
-    from astrbot_plugin_persona_studio.card_tools import CARD_MODEL_TOOLS
-    from astrbot_plugin_persona_studio.domain import MODEL_TOOLS
-    from astrbot_plugin_persona_studio.service import PersonaStudio
-    from astrbot_plugin_persona_studio.storage import Storage
+    from astrbot_plugin_fusheng_scroll.card_tools import CARD_MODEL_TOOLS
+    from astrbot_plugin_fusheng_scroll.domain import MODEL_TOOLS
+    from astrbot_plugin_fusheng_scroll.service import PersonaStudio
+    from astrbot_plugin_fusheng_scroll.storage import Storage
 
     db = SQLiteDatabase(str(tmp_path / "core.sqlite3"))
     await db.initialize()
@@ -77,7 +106,7 @@ async def env(tmp_path, monkeypatch):
                 description="Test",
                 parameters={"type": "object", "properties": {}},
                 handler=handler,
-                handler_module_path="astrbot_plugin_persona_studio.main",
+                handler_module_path="astrbot_plugin_fusheng_scroll.main",
             )
         )
     context = Context.__new__(Context)

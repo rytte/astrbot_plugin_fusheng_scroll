@@ -1,8 +1,8 @@
-# 🎭 人格工坊 · Persona Studio
+# 🎭 浮生绘卷 · Fusheng Scroll
 
 使用酒馆 Character Card V3 角色卡，兼容 V2 导入，在插件页面管理角色，也可在聊天中编辑与切换人格。
 
-`astrbot_plugin_persona_studio` 为 AstrBot 提供 **18 个模型工具**，支持人格创建、编辑、切换、历史恢复，以及图片、文字和 Markdown 文件展示。管理员可以直接使用，也可以授权可信用户管理各自创建的人格。
+`astrbot_plugin_fusheng_scroll` 为 AstrBot 提供 **18 个模型工具**，支持人格创建、编辑、切换、历史恢复，以及图片、文字和 Markdown 文件展示。管理员可以直接使用，也可以授权可信用户管理各自创建的人格。
 
 [功能一览](#features) · [安装与启用](#getting-started) · [聊天示例](#examples) · [模型工具](#tools) · [查看与导出](#display) · [权限与锁定](#permissions) · [使用与配置](./docs/使用与配置.md) · [开发验证](./docs/使用与配置.md#development)
 
@@ -56,20 +56,22 @@
 在 AstrBot WebUI 的插件管理中，使用以下仓库地址安装：
 
 ```text
-https://github.com/rytte/astrbot_plugin_persona_studio
+https://github.com/rytte/astrbot_plugin_fusheng_scroll
 ```
 
-也可以将完整仓库目录放入 AstrBot 的 `data/plugins/astrbot_plugin_persona_studio/`，然后重载插件或重启 AstrBot。
+也可以将完整仓库目录放入 AstrBot 的 `data/plugins/astrbot_plugin_fusheng_scroll/`，然后重载插件或重启 AstrBot。
+
+从「人格工坊」升级时，原数据目录 `data/plugin_data/astrbot_plugin_persona_studio/` 继续使用，无需移动数据库或图片。若插件目录改为新名称，首次加载会将同目录下的旧配置 `data/config/astrbot_plugin_persona_studio_config.json` 沿用到新配置文件，原文件保留；已有新配置不会被覆盖。升级时请替换旧安装，避免新旧两个插件同时加载；如有会话插件白名单或组件权限限制，请同步选择新插件。
 
 ### 3. 开放使用权限
 
 管理员默认可用。授权其他用户时，可以在插件配置的白名单中填写 **平台实例 ID + 用户 ID**，也可以由管理员在目标平台发送：
 
 ```text
-/ps whitelist add <用户ID>
+/fs whitelist add <用户ID>
 ```
 
-命令会自动使用管理员当前的平台实例，配置立即生效并在重启后保留。人格工坊模型工具的核心组件权限需允许成员使用，插件会在每次调用时继续校验白名单、人格归属和锁定状态。
+命令会自动使用管理员当前的平台实例，配置立即生效并在重启后保留。浮生绘卷模型工具的核心组件权限需允许成员使用，插件会在每次调用时继续校验白名单、人格归属和锁定状态。
 
 <a id="examples"></a>
 
@@ -154,12 +156,14 @@ https://github.com/rytte/astrbot_plugin_persona_studio
 
 人工命令负责锁定和授权：
 
+发送 `/fs` 查看用法；`/浮生` 为中文别名，子命令和权限规则相同。例如 `/浮生 lock 澪` 与 `/fs lock 澪` 等效。
+
 | 命令 | 用途 | 谁可以使用 |
 | --- | --- | --- |
-| `/ps lock <人格ID>` | 锁定人格及其版本链 | 有权管理该人格的用户 |
-| `/ps unlock <人格ID>` | 解除锁定 | 有权管理该人格的用户 |
-| `/ps whitelist add <用户ID>` | 授权当前平台实例中的用户 | AstrBot 管理员 |
-| `/ps whitelist remove <用户ID>` | 撤销该用户的白名单权限 | AstrBot 管理员 |
+| `/fs lock <人格ID>` | 锁定人格及其版本链 | 有权管理该人格的用户 |
+| `/fs unlock <人格ID>` | 解除锁定 | 有权管理该人格的用户 |
+| `/fs whitelist add <用户ID>` | 授权当前平台实例中的用户 | AstrBot 管理员 |
+| `/fs whitelist remove <用户ID>` | 撤销该用户的白名单权限 | AstrBot 管理员 |
 
 锁定后禁止修改、删除、恢复人格及删除备份，管理员也需要先人工解锁；查看和有权限的切换仍可使用。白名单用户可以解锁管理员锁定的自己的人格，因此锁定用于人工保护，不能作为管理员封禁手段。
 
@@ -194,7 +198,7 @@ https://github.com/rytte/astrbot_plugin_persona_studio
 
 ## 🤝 反馈与贡献
 
-遇到问题或有改进建议，欢迎提交 [Issue](https://github.com/rytte/astrbot_plugin_persona_studio/issues)；也欢迎通过 Pull Request 一起完善。
+遇到问题或有改进建议，欢迎提交 [Issue](https://github.com/rytte/astrbot_plugin_fusheng_scroll/issues)；也欢迎通过 Pull Request 一起完善。
 
 本地开发环境、测试依赖和验证命令见 [开发验证](./docs/使用与配置.md#development)。
 

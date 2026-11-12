@@ -150,7 +150,7 @@ def book_warnings(book):
     if book.get("recursive_scanning"):
         warnings.append("世界书递归扫描暂不支持；仅扫描真实对话，不扫描条目正文。")
     if book.get("token_budget") is not None:
-        warnings.append("世界书 token_budget 暂不计量；使用人格工坊的字符预算。")
+        warnings.append("世界书 token_budget 暂不计量；使用浮生绘卷的字符预算。")
     if "scan_depth" in book and (
         type(book["scan_depth"]) is not int
         or not 0 <= book["scan_depth"] <= MAX_SCAN_DEPTH

@@ -8,6 +8,7 @@ from astrbot.api import sp
 from astrbot.core.db.po import Persona
 from astrbot.core.skills.skill_manager import SkillManager
 
+from .branding import COMMAND_NAMES
 from .domain import (
     ACTION_PAYLOADS,
     CONTENT_FIELDS,
@@ -50,7 +51,7 @@ class PersonaStudio:
         if write and record is not None and record["locked"]:
             raise StudioError(
                 "persona_locked",
-                "人格已锁定，请真实用户先发送 /ps unlock <人格ID>。",
+                "人格已锁定，请真实用户先发送 /fs unlock <人格ID>。",
             )
         return record
 
@@ -669,8 +670,10 @@ class PersonaStudio:
         )
         if event.message_obj.raw_message is None or not any(
             original.startswith(prefix)
-            and original[len(prefix) :].split() == ["ps", "whitelist", action, user_id]
+            and original[len(prefix) :].split()
+            == [command, "whitelist", action, user_id]
             for prefix in prefixes
+            for command in COMMAND_NAMES
         ):
             raise StudioError(
                 "real_command_only",
@@ -733,8 +736,10 @@ class PersonaStudio:
         )
         if event.message_obj.raw_message is None or not any(
             original.startswith(prefix)
-            and original[len(prefix) :].split(maxsplit=2) == ["ps", action, persona_id]
+            and original[len(prefix) :].split(maxsplit=2)
+            == [command, action, persona_id]
             for prefix in prefixes
+            for command in COMMAND_NAMES
         ):
             raise StudioError(
                 "real_command_only",

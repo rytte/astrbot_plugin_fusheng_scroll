@@ -8,11 +8,13 @@ from astrbot.api import logger
 from astrbot.api.web import error_response, request
 from starlette.responses import Response
 
+from .branding import LEGACY_PLUGIN_NAME, PLUGIN_NAME
 from .card_assets import CardImage, data_image, prepare_image
 from .cards import MAX_UPLOAD_BYTES
 from .domain import StudioError, check_payload
 
-PREFIX = "/astrbot_plugin_persona_studio"
+PREFIX = "/" + PLUGIN_NAME
+LEGACY_PREFIX = "/" + LEGACY_PLUGIN_NAME
 
 
 class CardWeb:
@@ -34,9 +36,10 @@ class CardWeb:
             ("/upload-avatar", "POST", self.upload_avatar),
         ):
             wrapped = self.guard(handler)
-            self.context.register_web_api(
-                PREFIX + route, wrapped, [method], "人格工坊角色卡管理"
-            )
+            for prefix in (PREFIX, LEGACY_PREFIX):
+                self.context.register_web_api(
+                    prefix + route, wrapped, [method], "浮生绘卷角色卡管理"
+                )
             self.handlers.append(wrapped)
 
     def unregister(self):

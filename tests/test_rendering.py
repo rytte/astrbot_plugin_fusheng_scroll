@@ -8,10 +8,10 @@ from unittest.mock import AsyncMock
 
 import pytest
 from astrbot.api.message_components import Image, Nodes, Plain
-from astrbot_plugin_persona_studio import rendering
-from astrbot_plugin_persona_studio.domain import Settings, StudioError
-from astrbot_plugin_persona_studio.main import PersonaStudioPlugin
-from astrbot_plugin_persona_studio.templates import format_time, prompt_html
+from astrbot_plugin_fusheng_scroll import rendering
+from astrbot_plugin_fusheng_scroll.domain import Settings, StudioError
+from astrbot_plugin_fusheng_scroll.main import PersonaStudioPlugin
+from astrbot_plugin_fusheng_scroll.templates import format_time, prompt_html
 
 PNG = b"\x89PNG\r\n\x1a\nimage"
 
@@ -483,7 +483,7 @@ async def test_model_get_format_content_matrix(
         documents = [call.args[0] for call in page.set_content.await_args_list]
         assert len(documents) == len(expected_sheets)
         for document, sheet in zip(documents, expected_sheets):
-            assert '<div class="brand-name">人格工坊</div>' in document
+            assert '<div class="brand-name">浮生绘卷</div>' in document
             assert f'data-sheet="{sheet}"' in document
             if sheet == "content":
                 assert 'class="hero-meta"' not in document
@@ -511,7 +511,7 @@ async def test_model_get_format_content_matrix(
         component = created.event.send.await_args.args[0].chain[0]
         assert isinstance(component, Nodes)
         assert all(
-            node.uin == "bot" and node.name == "人格工坊" for node in component.nodes
+            node.uin == "bot" and node.name == "浮生绘卷" for node in component.nodes
         )
         displayed = "\n".join(node.content[0].text for node in component.nodes)
         assert response["delivery"]["forwards_submitted"] == 1
@@ -862,7 +862,7 @@ async def test_forward_uses_native_satori_message_api(created, monkeypatch, grou
     assert payload["content"].startswith("<message forward>")
     assert payload["content"].endswith("</message>")
     assert (
-        payload["content"].count('<author id="bot" name="人格工坊"/>')
+        payload["content"].count('<author id="bot" name="浮生绘卷"/>')
         == (response["delivery"]["forward_nodes_submitted"])
     )
     assert "版本与权限" in payload["content"] and "系统提示词" in payload["content"]

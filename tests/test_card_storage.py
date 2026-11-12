@@ -1,10 +1,10 @@
 import sqlite3
 
 import pytest
-from astrbot_plugin_persona_studio.card_storage import CardStorage
-from astrbot_plugin_persona_studio.cards import new_card
-from astrbot_plugin_persona_studio.domain import Actor, StudioError, canonical
-from astrbot_plugin_persona_studio.storage import Storage
+from astrbot_plugin_fusheng_scroll.card_storage import CardStorage
+from astrbot_plugin_fusheng_scroll.cards import new_card
+from astrbot_plugin_fusheng_scroll.domain import Actor, StudioError, canonical
+from astrbot_plugin_fusheng_scroll.storage import Storage
 
 
 def test_v1_migration_preserves_owners_locks_and_backups(tmp_path):

@@ -3,8 +3,8 @@ import json
 from unittest.mock import AsyncMock
 
 import pytest
-from astrbot_plugin_persona_studio.domain import Settings, StudioError
-from astrbot_plugin_persona_studio.storage import Storage
+from astrbot_plugin_fusheng_scroll.domain import Settings, StudioError
+from astrbot_plugin_fusheng_scroll.storage import Storage
 
 
 async def run(env, action, payload, *, actor=None, family="manage"):
@@ -13,7 +13,7 @@ async def run(env, action, payload, *, actor=None, family="manage"):
 
 async def set_lock(env, locked=True, *, actor=None):
     event = actor or env.native_event(
-        text=f"/ps {'lock' if locked else 'unlock'} alice"
+        text=f"/fs {'lock' if locked else 'unlock'} alice"
     )
     action = "lock" if locked else "unlock"
     return await run(
@@ -231,14 +231,14 @@ async def test_lock_blocks_admin_and_versions(created):
 
 
 async def test_white_user_can_unlock_admin_lock(created):
-    event = created.native_event("admin", admin=True, text="/ps lock alice")
+    event = created.native_event("admin", admin=True, text="/fs lock alice")
     assert (await set_lock(created, actor=event))["ok"]
     assert (await set_lock(created, False))["data"]["locked"] is False
 
 
 async def test_proxy_or_non_command_cannot_unlock(created):
     assert (await set_lock(created))["ok"]
-    proxy = created.native_event(text="/ps unlock alice")
+    proxy = created.native_event(text="/fs unlock alice")
     proxy.message_obj.raw_message = None
     assert (await set_lock(created, False, actor=proxy))["error"][
         "code"
@@ -254,6 +254,21 @@ async def test_old_command_cannot_unlock(created):
     response = await set_lock(created, False, actor=event)
     assert response["error"]["code"] == "real_command_only"
     assert created.storage.records("alice")[0]["locked"] == 1
+
+
+@pytest.mark.parametrize("action", ["lock", "unlock"])
+@pytest.mark.parametrize("prefix", ["/", "!"])
+async def test_removed_ps_command_cannot_change_lock(created, action, prefix):
+    if action == "unlock":
+        assert (await set_lock(created))["ok"]
+    previous = created.storage.records("alice")
+    created.core_config["wake_prefix"] = [prefix]
+    event = created.native_event(text=f"{prefix}ps {action} alice")
+    response = await run(
+        created, action, {"persona_id": "alice"}, actor=event, family="protect"
+    )
+    assert response["error"]["code"] == "real_command_only"
+    assert created.storage.records("alice") == previous
 
 
 async def test_multi_step_restore_and_undo_restore(created):
@@ -496,7 +511,7 @@ async def test_switch_no_conversation_or_forced_rule(created, monkeypatch):
         "code"
     ] == "no_current_conversation"
     monkeypatch.setattr(
-        "astrbot_plugin_persona_studio.service.sp.get_async",
+        "astrbot_plugin_fusheng_scroll.service.sp.get_async",
         AsyncMock(return_value={"persona_id": "forced"}),
     )
     assert (await run(created, "switch", {"persona_id": "alice"}))["error"][
@@ -572,7 +587,7 @@ def test_missing_initialized_database_is_not_recreated(tmp_path):
 
 
 async def test_incomplete_snapshot_never_defaults_to_all_tools(created):
-    from astrbot_plugin_persona_studio.domain import canonical, digest
+    from astrbot_plugin_fusheng_scroll.domain import canonical, digest
 
     backup_id = await first_backup(created)
     row = created.storage.connection.execute(

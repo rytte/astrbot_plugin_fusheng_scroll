@@ -5,9 +5,9 @@ from unittest.mock import AsyncMock
 import pytest
 from astrbot.core.agent.message import Message, TextPart, dump_messages_with_checkpoints
 from astrbot.core.provider.entities import ProviderRequest
-from astrbot_plugin_persona_studio.card_service import CardStudio
-from astrbot_plugin_persona_studio.cards import export_png, new_card
-from astrbot_plugin_persona_studio.domain import (
+from astrbot_plugin_fusheng_scroll.card_service import CardStudio
+from astrbot_plugin_fusheng_scroll.cards import export_png, new_card
+from astrbot_plugin_fusheng_scroll.domain import (
     Actor,
     StudioError,
     canonical,
@@ -235,7 +235,7 @@ async def test_import_deduplicates_submission_preserves_dates_and_restores_image
             Actor("p", "other", False), "create", {"import_id": preview["import_id"]}
         )
     raw, _, _ = await cards.cards.export(cards.actor, first["card_id"], png=True)
-    from astrbot_plugin_persona_studio.cards import import_card
+    from astrbot_plugin_fusheng_scroll.cards import import_card
 
     assert import_card(raw)[0] == document
     second = await create(cards, bind=False)
@@ -374,7 +374,7 @@ async def test_permanent_delete_checks_archive_name_revision_ownership_and_locks
         {"card_id": c["card_id"], "expected_revision": c["revision"], "locked": False},
     )
     locked = await cards.studio.execute(
-        cards.native_event(text=f"/ps lock {c['persona_id']}"),
+        cards.native_event(text=f"/fs lock {c['persona_id']}"),
         "protect",
         "lock",
         {"persona_id": c["persona_id"]},
@@ -426,7 +426,7 @@ async def test_core_lock_blocks_card_update_and_legacy_writes(cards):
         {"persona_id": c["persona_id"], "system_prompt": "绕过"},
     )
     assert legacy["error"]["code"] == "card_managed"
-    event = cards.native_event(text=f"/ps lock {c['persona_id']}")
+    event = cards.native_event(text=f"/fs lock {c['persona_id']}")
     locked = await cards.studio.execute(
         event, "protect", "lock", {"persona_id": c["persona_id"]}
     )
@@ -643,7 +643,7 @@ async def test_revoked_actor_cannot_create_during_core_quota_await(cards, monkey
 async def test_legacy_backup_restore_cannot_override_card_runtime(cards):
     c = await create(cards)
     current = await cards.studio.current(c["persona_id"])
-    from astrbot_plugin_persona_studio.domain import record_ref
+    from astrbot_plugin_fusheng_scroll.domain import record_ref
 
     record = cards.storage.find(c["persona_id"], record_ref(current))
     backup = cards.storage.backup(record, current, "test")

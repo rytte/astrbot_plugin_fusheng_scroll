@@ -1,14 +1,12 @@
 import asyncio
 import json
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
 from astrbot.api import AstrBotConfig
-from astrbot.core.star.filter.command import CommandFilter
-from astrbot_plugin_persona_studio.domain import Settings
-from astrbot_plugin_persona_studio.main import PersonaStudioPlugin
+from astrbot_plugin_fusheng_scroll.domain import Settings
+from astrbot_plugin_fusheng_scroll.main import PersonaStudioPlugin
 
 
 @pytest.fixture
@@ -23,7 +21,7 @@ def whitelist_env(created, tmp_path):
 
 async def change(env, action, user_id, *, event=None):
     event = event or env.native_event(
-        "admin", admin=True, text=f"/ps whitelist {action} {user_id}"
+        "admin", admin=True, text=f"/fs whitelist {action} {user_id}"
     )
     return await env.studio.execute(event, "whitelist", action, {"user_id": user_id})
 
@@ -62,7 +60,7 @@ async def test_remove_preserves_locked_persona_and_backups(whitelist_env):
     )
     backup_id = updated["data"]["backup_id"]
     locked = await env.studio.execute(
-        env.native_event(text="/ps lock alice"),
+        env.native_event(text="/fs lock alice"),
         "protect",
         "lock",
         {"persona_id": "alice"},
@@ -108,7 +106,7 @@ async def test_noop_does_not_save(whitelist_env, monkeypatch, action, user_id):
 async def test_group_command_is_allowed_by_default(whitelist_env):
     env = whitelist_env
     event = env.native_event(
-        "admin", admin=True, group=True, text="/ps whitelist add new"
+        "admin", admin=True, group=True, text="/fs whitelist add new"
     )
     response = await change(env, "add", "new", event=event)
     assert response["ok"], response
@@ -118,7 +116,7 @@ async def test_group_command_is_allowed_by_default(whitelist_env):
 async def test_identity_is_scoped_to_current_instance(whitelist_env):
     env = whitelist_env
     event = env.native_event(
-        "admin", admin=True, platform="other-instance", text="/ps whitelist add user"
+        "admin", admin=True, platform="other-instance", text="/fs whitelist add user"
     )
     assert (await change(env, "add", "user", event=event))["ok"]
     assert set(env.studio.settings().whitelist) == {
@@ -135,7 +133,7 @@ async def test_identity_is_scoped_to_current_instance(whitelist_env):
 @pytest.mark.parametrize("action", ["add", "remove"])
 async def test_only_admin_can_change_whitelist(whitelist_env, action):
     env = whitelist_env
-    event = env.native_event(text=f"/ps whitelist {action} user")
+    event = env.native_event(text=f"/fs whitelist {action} user")
     previous = dict(env.config)
     response = await change(env, action, "user", event=event)
     assert response["error"]["code"] == "admin_only"
@@ -143,13 +141,14 @@ async def test_only_admin_can_change_whitelist(whitelist_env, action):
 
 
 @pytest.mark.parametrize("case", ["outsider", "group", "cron", "api_restricted"])
-async def test_restricted_callers_cannot_change_whitelist(whitelist_env, case):
+@pytest.mark.parametrize("command", ["fs", "浮生"])
+async def test_restricted_callers_cannot_change_whitelist(whitelist_env, case, command):
     env = whitelist_env
     event = env.native_event(
         "admin",
         admin=case != "outsider",
         group=case == "group",
-        text="/ps whitelist add new",
+        text=f"/{command} whitelist add new",
     )
     if case == "cron":
         event.platform_meta.name = "cron"
@@ -169,21 +168,44 @@ async def test_restricted_callers_cannot_change_whitelist(whitelist_env, case):
 @pytest.mark.parametrize(
     "text,raw",
     [
-        ("/ps whitelist add new", None),
+        ("/fs whitelist add new", None),
         ("管理白名单", {}),
-        ("/ps whitelist remove new", {}),
-        ("/ps whitelist add different", {}),
-        ("/ps whitelist add new extra", {}),
+        ("/fs whitelist remove new", {}),
+        ("/fs whitelist add different", {}),
+        ("/fs whitelist add new extra", {}),
     ],
 )
-async def test_proxy_and_mismatched_commands_are_rejected(whitelist_env, text, raw):
+@pytest.mark.parametrize("command", ["fs", "浮生"])
+async def test_proxy_and_mismatched_commands_are_rejected(
+    whitelist_env, text, raw, command
+):
     env = whitelist_env
+    text = text.replace("/fs", f"/{command}", 1)
     event = env.native_event("admin", admin=True, text=text)
     event.message_obj.raw_message = raw
     previous = dict(env.config)
     response = await change(env, "add", "new", event=event)
     assert response["error"]["code"] == "real_command_only"
     assert env.config == previous
+
+
+@pytest.mark.parametrize("action,user_id", [("add", "new"), ("remove", "user")])
+@pytest.mark.parametrize("prefix", ["/", "!"])
+async def test_removed_ps_command_cannot_change_whitelist(
+    whitelist_env, action, user_id, prefix
+):
+    env = whitelist_env
+    env.core_config["wake_prefix"] = [prefix]
+    event = env.native_event(
+        "admin", admin=True, text=f"{prefix}ps whitelist {action} {user_id}"
+    )
+    previous = dict(env.config)
+    path = Path(env.config.config_path)
+    original_file = await asyncio.to_thread(path.read_bytes)
+    response = await change(env, action, user_id, event=event)
+    assert response["error"]["code"] == "real_command_only"
+    assert env.config == previous
+    assert await asyncio.to_thread(path.read_bytes) == original_file
 
 
 @pytest.mark.parametrize(
@@ -196,7 +218,7 @@ async def test_invalid_user_id_is_rejected(whitelist_env, user_id):
 
 async def test_unknown_fields_and_actions_are_rejected(whitelist_env):
     env = whitelist_env
-    event = env.native_event("admin", admin=True, text="/ps whitelist add new")
+    event = env.native_event("admin", admin=True, text="/fs whitelist add new")
     response = await env.studio.execute(
         event, "whitelist", "add", {"user_id": "new", "platform_id": "other"}
     )
@@ -229,7 +251,7 @@ async def test_save_failure_restores_memory_and_disk(
 
 async def test_permission_is_rechecked_inside_lock(whitelist_env):
     env = whitelist_env
-    event = env.native_event("admin", admin=True, text="/ps whitelist add new")
+    event = env.native_event("admin", admin=True, text="/fs whitelist add new")
     await env.studio.lock.acquire()
     pending = asyncio.create_task(change(env, "add", "new", event=event))
     try:
@@ -302,19 +324,23 @@ async def test_audit_failure_reports_persisted_change(whitelist_env, monkeypatch
 
 @pytest.mark.parametrize("action,user_id", [("add", "new"), ("remove", "user")])
 @pytest.mark.parametrize("group", [False, True])
-async def test_native_command_filter_dispatch(whitelist_env, action, user_id, group):
+@pytest.mark.parametrize("command", ["fs", "浮生"])
+async def test_native_command_filter_dispatch(
+    whitelist_env, action, user_id, group, command, persona_command_filter
+):
     env = whitelist_env
     env.config["allow_group_chat"] = group
     plugin = PersonaStudioPlugin(env.context, env.config)
     plugin.studio = env.studio
     event = env.native_event(
-        "admin", admin=True, group=group, text=f"/ps whitelist {action} {user_id}"
+        "admin",
+        admin=True,
+        group=group,
+        text=f"/{command} whitelist {action} {user_id}",
     )
     event.message_str = event.message_obj.message_str[1:]
     event.is_at_or_wake_command = True
-    command_filter = CommandFilter(
-        "ps", handler_md=SimpleNamespace(handler=PersonaStudioPlugin.persona)
-    )
+    command_filter = persona_command_filter
     assert command_filter.filter(event, env.core_config)
     replies = [
         reply
@@ -335,18 +361,21 @@ async def test_bad_command_syntax_does_not_mutate(whitelist_env, arguments):
     plugin = PersonaStudioPlugin(env.context, env.config)
     plugin.studio = env.studio
     previous = dict(env.config)
-    event = env.native_event("admin", admin=True, text=f"/ps {arguments}")
+    event = env.native_event("admin", admin=True, text=f"/fs {arguments}")
     replies = [reply async for reply in plugin.persona(event, arguments)]
     assert len(replies) == 1 and "用法" in replies[0].chain[0].text
     assert env.config == previous
 
 
-async def test_custom_prefix_and_original_arguments(whitelist_env):
+@pytest.mark.parametrize("command", ["fs", "浮生"])
+async def test_custom_prefix_and_original_arguments(whitelist_env, command):
     env = whitelist_env
     env.core_config["wake_prefix"] = ["!"]
     plugin = PersonaStudioPlugin(env.context, env.config)
     plugin.studio = env.studio
-    event = env.native_event("admin", admin=True, text="!ps whitelist add actual-user")
+    event = env.native_event(
+        "admin", admin=True, text=f"!{command} whitelist add actual-user"
+    )
     replies = [
         reply async for reply in plugin.persona(event, "whitelist add substituted-user")
     ]

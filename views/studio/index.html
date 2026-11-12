@@ -4,21 +4,20 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
-  <title>人格工坊</title>
+  <title>浮生绘卷</title>
   <link rel="stylesheet" href="./app.css">
   <script src="/api/plugin/page/bridge-sdk.js"></script>
   <script type="module" src="./app.js"></script>
 </head>
 <body>
   <div id="studio">
-    <header class="topbar">
-      <div class="brand"><span class="brand-mark" aria-hidden="true">✦</span><div><h1>人格工坊</h1><p>PERSONA STUDIO</p></div></div>
-      <div class="actions"><button id="import-button"><span data-icon="upload"></span>导入角色</button><button id="new-button" class="primary"><span data-icon="plus"></span>新建角色</button></div>
-    </header>
     <div id="notice" role="status" aria-live="polite" aria-atomic="true" hidden><span id="notice-symbol" aria-hidden="true"></span><span id="notice-message"></span><button id="notice-close" aria-label="关闭提示" type="button"><span data-icon="x"></span></button></div>
     <div id="conversion-notice" class="notice" role="status" hidden></div>
-    <main id="collection" class="collection" aria-labelledby="collection-title">
-      <header class="collection-heading"><p class="eyebrow">CHARACTER COLLECTION</p><h2 id="collection-title">你的角色，各有故事。</h2><p class="muted">挑选一位角色，继续完善它的世界。</p></header>
+    <main id="collection" class="collection" aria-labelledby="studio-title">
+      <header id="collection-heading" class="collection-heading">
+        <div class="brand"><img class="brand-mark" src="./logo.png" width="52" height="52" alt=""><div><h1 id="studio-title">浮生绘卷</h1><p id="collection-title">你的角色，各有故事。</p></div></div>
+        <div id="studio-actions" class="actions"><button id="import-button"><span data-icon="upload"></span>导入角色</button><button id="new-button" class="primary"><span data-icon="plus"></span>新建角色</button></div>
+      </header>
       <div class="collection-toolbar">
         <div class="collection-filters" role="group" aria-label="角色库范围"><button data-collection="active" aria-pressed="true">全部角色 <span id="card-count" class="count">0</span></button><button data-collection="archived" aria-pressed="false"><span data-icon="archive"></span>已归档</button></div>
         <div class="collection-tools"><label class="search-field"><span data-icon="search"></span><span class="sr-only">搜索角色名称、简介或标签</span><input id="search" type="search" placeholder="搜索角色"></label><button id="refresh-button" class="icon-button" aria-label="刷新角色库"><span data-icon="refresh"></span></button></div>
@@ -27,7 +26,7 @@
       <footer class="collection-footer">Character Card V3 <span aria-hidden="true">·</span> 支持导入 V2 / V3 JSON 与 PNG</footer>
     </main>
     <main id="workspace" class="workspace" aria-label="角色编辑工作台" hidden>
-      <div class="editor-topline"><button data-action="back" class="quiet"><span data-icon="arrow-left"></span>返回角色库</button><label class="card-switcher"><span class="sr-only">切换编辑角色</span><select id="card-switcher" aria-label="切换编辑角色"></select></label></div>
+      <div id="editor-topline" class="editor-topline"><div class="editor-navigation"><button data-action="back" class="quiet"><span data-icon="arrow-left"></span>返回角色库</button><label class="card-switcher"><span class="sr-only">切换编辑角色</span><select id="card-switcher" aria-label="切换编辑角色"></select></label></div></div>
       <div id="editor"></div>
     </main>
     <input id="upload" type="file" accept=".json,.png,application/json,image/png" hidden>

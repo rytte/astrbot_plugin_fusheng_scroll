@@ -279,6 +279,8 @@ function renderIdentity() {
 }
 function render() {
   $('#collection').hidden=state.view!=='collection'; $('#workspace').hidden=state.view!=='editor';
+  const actions=$('#studio-actions'), actionHost=$(state.view==='editor'?'#editor-topline':'#collection-heading');
+  if(actions.parentElement!==actionHost)actionHost.append(actions);
   renderLibrary();
   $('#studio').classList.toggle('show-keys',state.showKeys);
   if(!state.current){$('#editor').replaceChildren();return;}
@@ -328,7 +330,7 @@ function capability(key,label) {
 }
 function renderAstrbot() {
   const c=state.current, sync=c.sync;
-  const lockHint=sync.core_locked?`<div class="notice">绑定的人格已被人工锁定，请在聊天中发送 /ps unlock ${escape(c.persona_id)} 后刷新。</div>`:'';
+  const lockHint=sync.core_locked?`<div class="notice">绑定的人格已被人工锁定，请在聊天中发送 /fs unlock ${escape(c.persona_id)} 后刷新。</div>`:'';
   const abnormal=['conflict','failed','missing','pending'].includes(sync.status);
   $('#panel').innerHTML=`${lockHint}${abnormal?`<div class="notice"><p>${escape(sync.error||statusNames[sync.status])}</p><div class="actions">${sync.status==='conflict'&&sync.same_record?'<button data-action="sync-diff">查看差异</button>':''}${['failed','pending'].includes(sync.status)?'<button data-action="sync">手动重试同步</button>':''}</div></div>`:''}<div class="details-row"><span>绑定人格</span><span>${escape(c.persona_id||'尚未绑定')}</span></div><div class="details-row"><span>同步状态</span><span class="${sync.status==='synced'?'ok':'warning'}">${statusNames[sync.status]||escape(sync.status)}</span></div><div class="details-row"><span>创建者</span><span>${escape(c.owner?c.owner.join(' / '):'未设归属 · 由管理员管理')}</span></div><div class="actions section">${c.persona_id?'<button data-action="unbind">解除绑定</button>':'<button data-action="bind">创建并绑定人格</button>'}<button data-action="lock">${c.locked?'解锁角色卡':'锁定角色卡'}</button>${!c.deleted?'<button data-action="archive" class="danger">归档角色卡</button>':''}</div><div class="form section">${capability('tools','可用工具')}${capability('skills','可用技能')}${field('自定义错误回复','custom_error_message',state.options.custom_error_message||'',{scope:'options-null',area:true,hint:'留空时清除。此项及工具、技能独立于人物卡标准字段。'})}</div>`;
 }
@@ -599,7 +601,7 @@ document.addEventListener('keydown',event=>{
 
 async function start() {
   document.querySelectorAll('[data-icon]').forEach(el=>{el.innerHTML=icon(el.dataset.icon);el.setAttribute('aria-hidden','true');});
-  if(!bridge){notice('请从 AstrBot WebUI 的插件页面进入人格工坊。',true);$('#card-list').textContent='尚未连接';return;}
+  if(!bridge){notice('请从 AstrBot WebUI 的插件页面进入浮生绘卷。',true);$('#card-list').textContent='尚未连接';return;}
   bridge.onContext(context=>{document.documentElement.dataset.theme=context.isDark?'dark':'light';});
   await bridge.ready();
   await busy(async()=>{await loadList();render();});

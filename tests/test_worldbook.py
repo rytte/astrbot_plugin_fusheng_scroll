@@ -1,7 +1,7 @@
 import copy
 
 import pytest
-from astrbot_plugin_persona_studio.worldbook import (
+from astrbot_plugin_fusheng_scroll.worldbook import (
     HEADER,
     MAX_SCAN_CHARS,
     NAMESPACE,
