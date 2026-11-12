@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .card_service import CARD_ACTIONS
+from .service import CARD_ACTIONS
 
 CARD_MODEL_TOOLS = {
     "character_list": "list",

@@ -9,13 +9,7 @@ from astrbot.api.web import PluginRequest, bind_request_context
 from astrbot.core.agent.run_context import ContextWrapper
 from astrbot.core.agent.tool import FunctionTool
 from astrbot.core.astr_agent_tool_exec import FunctionToolExecutor
-from astrbot_plugin_fusheng_scroll.card_service import CardStudio
-from astrbot_plugin_fusheng_scroll.card_tools import (
-    CARD_MODEL_TOOLS,
-    card_tool_parameters,
-)
-from astrbot_plugin_fusheng_scroll.card_web import LEGACY_PREFIX, PREFIX, CardWeb
-from astrbot_plugin_fusheng_scroll.cards import (
+from astrbot_plugin_fusheng_scroll.characters.codec import (
     _chunk,
     blank_png,
     export_png,
@@ -23,7 +17,13 @@ from astrbot_plugin_fusheng_scroll.cards import (
     new_card,
     png_chunks,
 )
-from astrbot_plugin_fusheng_scroll.domain import Actor, canonical
+from astrbot_plugin_fusheng_scroll.characters.service import CardStudio
+from astrbot_plugin_fusheng_scroll.characters.tools import (
+    CARD_MODEL_TOOLS,
+    card_tool_parameters,
+)
+from astrbot_plugin_fusheng_scroll.characters.web import LEGACY_PREFIX, PREFIX, CardWeb
+from astrbot_plugin_fusheng_scroll.core.domain import Actor, canonical
 from astrbot_plugin_fusheng_scroll.main import PersonaStudioPlugin
 from fastapi import FastAPI, Request
 

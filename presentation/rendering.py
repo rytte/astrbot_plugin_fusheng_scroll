@@ -10,8 +10,8 @@ from astrbot.api.event import MessageChain
 from astrbot.api.message_components import File, Image, Node, Nodes, Plain
 from astrbot.core.utils.astrbot_path import get_astrbot_temp_path
 
-from .branding import PLUGIN_NAME
-from .domain import StudioError, identify, view_options
+from ..core.branding import PLUGIN_NAME
+from ..core.domain import StudioError, identify, view_options
 from .templates import content_html, metadata_fields, overview_html
 
 FORWARD_NODE_CHARS = 4000

@@ -8,8 +8,8 @@ from astrbot.api import sp
 from astrbot.core.db.po import Persona
 from astrbot.core.skills.skill_manager import SkillManager
 
-from .branding import COMMAND_NAMES
-from .domain import (
+from ..core.branding import COMMAND_NAMES
+from ..core.domain import (
     ACTION_PAYLOADS,
     CONTENT_FIELDS,
     MANAGEMENT_TOOLS,

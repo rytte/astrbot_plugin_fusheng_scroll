@@ -7,8 +7,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from astrbot_plugin_fusheng_scroll import card_assets
-from astrbot_plugin_fusheng_scroll.card_assets import (
+from astrbot_plugin_fusheng_scroll.characters import assets as card_assets
+from astrbot_plugin_fusheng_scroll.characters.assets import (
     CardAssets,
     PublicResolver,
     data_image,
@@ -17,8 +17,7 @@ from astrbot_plugin_fusheng_scroll.card_assets import (
     main_icon,
     remote_url,
 )
-from astrbot_plugin_fusheng_scroll.card_service import CardStudio
-from astrbot_plugin_fusheng_scroll.cards import (
+from astrbot_plugin_fusheng_scroll.characters.codec import (
     MAX_UPLOAD_BYTES,
     _chunk,
     blank_png,
@@ -27,7 +26,13 @@ from astrbot_plugin_fusheng_scroll.cards import (
     new_card,
     png_chunks,
 )
-from astrbot_plugin_fusheng_scroll.domain import Actor, StudioError, canonical, identify
+from astrbot_plugin_fusheng_scroll.characters.service import CardStudio
+from astrbot_plugin_fusheng_scroll.core.domain import (
+    Actor,
+    StudioError,
+    canonical,
+    identify,
+)
 from PIL import Image
 
 

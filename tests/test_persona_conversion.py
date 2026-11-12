@@ -6,14 +6,14 @@ from unittest.mock import AsyncMock
 
 import pytest
 from astrbot.core.provider.entities import ProviderRequest
-from astrbot_plugin_fusheng_scroll.card_service import CardStudio
-from astrbot_plugin_fusheng_scroll.cards import (
+from astrbot_plugin_fusheng_scroll.characters.codec import (
     PERSONA_EXTENSION,
     compile_card,
     from_persona,
     new_card,
 )
-from astrbot_plugin_fusheng_scroll.domain import (
+from astrbot_plugin_fusheng_scroll.characters.service import CardStudio
+from astrbot_plugin_fusheng_scroll.core.domain import (
     StudioError,
     identify,
     record_ref,

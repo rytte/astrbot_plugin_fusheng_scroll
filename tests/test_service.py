@@ -3,8 +3,8 @@ import json
 from unittest.mock import AsyncMock
 
 import pytest
-from astrbot_plugin_fusheng_scroll.domain import Settings, StudioError
-from astrbot_plugin_fusheng_scroll.storage import Storage
+from astrbot_plugin_fusheng_scroll.core.domain import Settings, StudioError
+from astrbot_plugin_fusheng_scroll.core.storage import Storage
 
 
 async def run(env, action, payload, *, actor=None, family="manage"):
@@ -511,7 +511,7 @@ async def test_switch_no_conversation_or_forced_rule(created, monkeypatch):
         "code"
     ] == "no_current_conversation"
     monkeypatch.setattr(
-        "astrbot_plugin_fusheng_scroll.service.sp.get_async",
+        "astrbot_plugin_fusheng_scroll.personas.service.sp.get_async",
         AsyncMock(return_value={"persona_id": "forced"}),
     )
     assert (await run(created, "switch", {"persona_id": "alice"}))["error"][
@@ -587,7 +587,7 @@ def test_missing_initialized_database_is_not_recreated(tmp_path):
 
 
 async def test_incomplete_snapshot_never_defaults_to_all_tools(created):
-    from astrbot_plugin_fusheng_scroll.domain import canonical, digest
+    from astrbot_plugin_fusheng_scroll.core.domain import canonical, digest
 
     backup_id = await first_backup(created)
     row = created.storage.connection.execute(

@@ -78,10 +78,10 @@ async def env(tmp_path, monkeypatch):
     from astrbot.core.persona_mgr import PersonaManager
     from astrbot.core.provider.func_tool_manager import FunctionToolManager
     from astrbot.core.star.context import Context
-    from astrbot_plugin_fusheng_scroll.card_tools import CARD_MODEL_TOOLS
-    from astrbot_plugin_fusheng_scroll.domain import MODEL_TOOLS
-    from astrbot_plugin_fusheng_scroll.service import PersonaStudio
-    from astrbot_plugin_fusheng_scroll.storage import Storage
+    from astrbot_plugin_fusheng_scroll.characters.tools import CARD_MODEL_TOOLS
+    from astrbot_plugin_fusheng_scroll.core.domain import MODEL_TOOLS
+    from astrbot_plugin_fusheng_scroll.core.storage import Storage
+    from astrbot_plugin_fusheng_scroll.personas.service import PersonaStudio
 
     db = SQLiteDatabase(str(tmp_path / "core.sqlite3"))
     await db.initialize()

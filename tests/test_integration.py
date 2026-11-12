@@ -11,9 +11,9 @@ from astrbot.core.agent.tool import FunctionTool
 from astrbot.core.astr_agent_tool_exec import FunctionToolExecutor
 from astrbot.core.db.po import Conversation
 from astrbot.core.provider.entities import ProviderRequest
-from astrbot_plugin_fusheng_scroll.domain import MODEL_TOOLS, Settings
+from astrbot_plugin_fusheng_scroll.core.domain import MODEL_TOOLS, Settings
 from astrbot_plugin_fusheng_scroll.main import PersonaStudioPlugin
-from astrbot_plugin_fusheng_scroll.tool_schema import tool_parameters
+from astrbot_plugin_fusheng_scroll.personas.tools import tool_parameters
 
 
 @pytest.mark.parametrize("path", ["main", "handoff", "full"])
@@ -133,6 +133,83 @@ async def test_revocation_during_quota_check_prevents_create(env, monkeypatch):
     )
     assert response["error"]["code"] == "forbidden"
     assert await env.studio.current("denied") is None
+
+
+@pytest.mark.parametrize(
+    "directory", ["astrbot_plugin_fusheng_scroll", "astrbot_plugin_persona_studio"]
+)
+def test_plugin_packages_load_under_astrbot_namespace(tmp_path, directory):
+    """Import a standalone installation, without the test package alias."""
+    import os
+    import shutil
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    source = Path(os.environ.get("ASTRBOT_SOURCE", root.parent / "AstrBot"))
+    plugins = tmp_path / "data" / "plugins"
+    plugins.mkdir(parents=True)
+    (tmp_path / "data" / "__init__.py").touch()
+    (plugins / "__init__.py").touch()
+    shutil.copytree(
+        root,
+        plugins / directory,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            "__pycache__",
+            ".pytest_cache",
+            ".ruff_cache",
+            "tests",
+            "docs",
+        ),
+    )
+    script = """
+import importlib
+import sys
+from pathlib import Path
+
+from astrbot.core.star.star import star_map
+from astrbot.core.star.star_handler import star_handlers_registry
+from astrbot.core.star.star_manager import PluginManager
+
+directory = sys.argv[1]
+prefix = f"data.plugins.{directory}"
+discovered = PluginManager._get_modules("data/plugins")
+assert any(item["pname"] == directory and item["module"] == "main" for item in discovered)
+entry = importlib.import_module(prefix + ".main")
+assert entry.PersonaStudioPlugin.__module__ == prefix + ".main"
+assert star_map[entry.__name__].star_cls_type is entry.PersonaStudioPlugin
+for name in (*entry.MODEL_TOOLS, *entry.CARD_MODEL_TOOLS):
+    handler = getattr(entry.PersonaStudioPlugin, name)
+    metadata = star_handlers_registry.get_handler_by_full_name(f"{handler.__module__}_{handler.__name__}")
+    assert metadata is not None and metadata.handler_module_path == entry.__name__, name
+related = set(PluginManager._get_plugin_related_modules(directory))
+for module in (
+    "core.branding", "core.domain", "core.storage",
+    "characters.assets", "characters.codec", "characters.service", "characters.storage",
+    "characters.tools", "characters.web", "characters.worldbook",
+    "personas.service", "personas.tools", "presentation.rendering", "presentation.templates",
+):
+    name = f"{prefix}.{module}"
+    loaded = importlib.import_module(name)
+    assert Path(loaded.__file__).resolve().is_relative_to(Path("data/plugins", directory).resolve())
+    assert name in related, name
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script, directory],
+        cwd=tmp_path,
+        env={
+            **os.environ,
+            "PYTHONPATH": os.pathsep.join((str(tmp_path), str(source))),
+            "ASTRBOT_ROOT": str(tmp_path),
+        },
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 async def test_plugin_initializes_without_core_patch(env, tmp_path, monkeypatch):

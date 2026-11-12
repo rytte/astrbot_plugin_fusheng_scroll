@@ -196,6 +196,39 @@ https://github.com/rytte/astrbot_plugin_fusheng_scroll
 
 归属、锁定、版本链、备份和审计保存在 `data/plugin_data/astrbot_plugin_persona_studio/studio.sqlite3`，数据库含完整历史提示词。插件锁定只约束本插件；核心人格数据与插件数据库之间没有跨库事务，失败可能留下快照或部分效果，写操作不会自动补偿或重试。完整说明见 [数据和边界](./docs/使用与配置.md#boundaries)。
 
+## 🧱 项目结构
+
+```text
+astrbot_plugin_fusheng_scroll/
+├── main.py                 # AstrBot 插件入口、命令与事件注册
+├── __init__.py
+├── metadata.yaml           # 插件元信息
+├── _conf_schema.json       # AstrBot 配置定义
+├── core/                   # 共享基础设施
+│   ├── branding.py         # 插件标识与命令名称
+│   ├── domain.py           # 配置、权限、校验与通用模型
+│   └── storage.py          # 数据库迁移、权限、人格备份与审计
+├── characters/             # 角色卡功能
+│   ├── codec.py            # V2/V3 解析、导入导出与编译
+│   ├── assets.py           # 图片解析、下载与缓存
+│   ├── service.py          # 角色卡操作、人格同步与对话适配
+│   ├── storage.py          # 角色卡、快照与资源持久化
+│   ├── tools.py            # 角色卡模型工具定义
+│   ├── web.py              # 插件页面 API
+│   └── worldbook.py        # 世界书扫描、匹配与注入
+├── personas/               # AstrBot 普通人格管理
+│   ├── service.py          # 人格、备份、锁定与白名单操作
+│   └── tools.py            # 人格与备份模型工具定义
+├── presentation/           # 聊天展示与导出
+│   ├── rendering.py        # 消息发送、图片分页与 Markdown 导出
+│   └── templates.py        # HTML 模板与 Markdown 渲染
+├── views/studio/           # 插件管理页面静态资源
+├── tests/                  # 单元、核心集成与浏览器测试
+└── docs/                   # 使用、配置与角色卡说明
+```
+
+插件类与工具、命令及事件注册保留在根目录 `main.py`，业务模块使用包内相对导入。AstrBot 仍可直接加载整个插件目录；页面资源和现有数据存储位置沿用原路径。
+
 ## 🤝 反馈与贡献
 
 遇到问题或有改进建议，欢迎提交 [Issue](https://github.com/rytte/astrbot_plugin_fusheng_scroll/issues)；也欢迎通过 Pull Request 一起完善。

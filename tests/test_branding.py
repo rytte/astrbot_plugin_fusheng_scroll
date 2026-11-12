@@ -2,8 +2,8 @@ import json
 
 import pytest
 from astrbot.api import AstrBotConfig
-from astrbot_plugin_fusheng_scroll.branding import LEGACY_PLUGIN_NAME, PLUGIN_NAME
-from astrbot_plugin_fusheng_scroll.domain import StudioError
+from astrbot_plugin_fusheng_scroll.core.branding import LEGACY_PLUGIN_NAME, PLUGIN_NAME
+from astrbot_plugin_fusheng_scroll.core.domain import StudioError
 from astrbot_plugin_fusheng_scroll.main import PersonaStudioPlugin
 
 

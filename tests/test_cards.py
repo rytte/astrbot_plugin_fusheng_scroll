@@ -4,7 +4,7 @@ import json
 import zlib
 
 import pytest
-from astrbot_plugin_fusheng_scroll.cards import (
+from astrbot_plugin_fusheng_scroll.characters.codec import (
     MAX_CARD_BYTES,
     _chunk,
     blank_png,
@@ -16,7 +16,7 @@ from astrbot_plugin_fusheng_scroll.cards import (
     normalize_card,
     png_chunks,
 )
-from astrbot_plugin_fusheng_scroll.domain import StudioError, canonical
+from astrbot_plugin_fusheng_scroll.core.domain import StudioError, canonical
 
 
 def sample():

@@ -1,6 +1,6 @@
 from copy import deepcopy
 
-from .domain import ACTION_PAYLOADS, MODEL_TOOLS, StudioError
+from ..core.domain import ACTION_PAYLOADS, MODEL_TOOLS, StudioError
 
 
 def tool_parameters(name: str, settings) -> dict:

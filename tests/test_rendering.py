@@ -8,10 +8,13 @@ from unittest.mock import AsyncMock
 
 import pytest
 from astrbot.api.message_components import Image, Nodes, Plain
-from astrbot_plugin_fusheng_scroll import rendering
-from astrbot_plugin_fusheng_scroll.domain import Settings, StudioError
+from astrbot_plugin_fusheng_scroll.core.domain import Settings, StudioError
 from astrbot_plugin_fusheng_scroll.main import PersonaStudioPlugin
-from astrbot_plugin_fusheng_scroll.templates import format_time, prompt_html
+from astrbot_plugin_fusheng_scroll.presentation import rendering
+from astrbot_plugin_fusheng_scroll.presentation.templates import (
+    format_time,
+    prompt_html,
+)
 
 PNG = b"\x89PNG\r\n\x1a\nimage"
 

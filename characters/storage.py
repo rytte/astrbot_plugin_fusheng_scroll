@@ -9,8 +9,8 @@ import time
 import uuid
 from pathlib import Path
 
-from .cards import DEFAULT_OPTIONS, load_json, normalize_card
-from .domain import StudioError, canonical, digest, record_ref
+from ..core.domain import StudioError, canonical, digest, record_ref
+from .codec import DEFAULT_OPTIONS, load_json, normalize_card
 
 
 class CardStorage:

@@ -1,8 +1,8 @@
 import jsonschema
 import pytest
 from astrbot.core.agent.tool import FunctionTool, ToolSet
-from astrbot_plugin_fusheng_scroll.domain import MODEL_TOOLS, Settings, StudioError
-from astrbot_plugin_fusheng_scroll.tool_schema import tool_parameters
+from astrbot_plugin_fusheng_scroll.core.domain import MODEL_TOOLS, Settings, StudioError
+from astrbot_plugin_fusheng_scroll.personas.tools import tool_parameters
 
 ARGUMENTS = {
     "persona_list": {},

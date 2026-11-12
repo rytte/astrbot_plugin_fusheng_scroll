@@ -5,9 +5,9 @@ from unittest.mock import AsyncMock
 import pytest
 from astrbot.core.agent.message import Message, TextPart, dump_messages_with_checkpoints
 from astrbot.core.provider.entities import ProviderRequest
-from astrbot_plugin_fusheng_scroll.card_service import CardStudio
-from astrbot_plugin_fusheng_scroll.cards import export_png, new_card
-from astrbot_plugin_fusheng_scroll.domain import (
+from astrbot_plugin_fusheng_scroll.characters.codec import export_png, new_card
+from astrbot_plugin_fusheng_scroll.characters.service import CardStudio
+from astrbot_plugin_fusheng_scroll.core.domain import (
     Actor,
     StudioError,
     canonical,
@@ -250,7 +250,7 @@ async def test_import_deduplicates_submission_preserves_dates_and_restores_image
             Actor("p", "other", False), "create", {"import_id": preview["import_id"]}
         )
     raw, _, _ = await cards.cards.export(cards.actor, first["card_id"], png=True)
-    from astrbot_plugin_fusheng_scroll.cards import import_card
+    from astrbot_plugin_fusheng_scroll.characters.codec import import_card
 
     assert import_card(raw)[0] == document
     second = await create(cards, bind=False)
@@ -897,7 +897,7 @@ async def test_revoked_actor_cannot_create_during_core_quota_await(cards, monkey
 async def test_legacy_backup_restore_cannot_override_card_runtime(cards):
     c = await create(cards)
     current = await cards.studio.current(c["persona_id"])
-    from astrbot_plugin_fusheng_scroll.domain import record_ref
+    from astrbot_plugin_fusheng_scroll.core.domain import record_ref
 
     record = cards.storage.find(c["persona_id"], record_ref(current))
     backup = cards.storage.backup(record, current, "test")

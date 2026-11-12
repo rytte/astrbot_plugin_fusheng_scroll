@@ -14,7 +14,7 @@ import re
 import struct
 import zlib
 
-from .domain import StudioError, canonical
+from ..core.domain import StudioError, canonical
 from .worldbook import book_warnings
 
 MAX_CARD_BYTES = 2 * 1024 * 1024

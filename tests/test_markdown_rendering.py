@@ -2,9 +2,12 @@ import io
 from types import SimpleNamespace
 
 import pytest
-from astrbot_plugin_fusheng_scroll import rendering
-from astrbot_plugin_fusheng_scroll.domain import Settings
-from astrbot_plugin_fusheng_scroll.templates import content_html, prompt_html
+from astrbot_plugin_fusheng_scroll.core.domain import Settings
+from astrbot_plugin_fusheng_scroll.presentation import rendering
+from astrbot_plugin_fusheng_scroll.presentation.templates import (
+    content_html,
+    prompt_html,
+)
 
 
 @pytest.fixture

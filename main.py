@@ -10,21 +10,21 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools
 from astrbot.core.star.filter.command import GreedyStr
 
-from .branding import (
+from .characters.service import CardStudio
+from .characters.tools import CARD_MODEL_TOOLS, card_tool_parameters
+from .characters.web import CardWeb
+from .core.branding import (
     COMMAND_ALIASES,
     COMMAND_NAME,
     COMMAND_NAMES,
     LEGACY_PLUGIN_NAME,
     PLUGIN_NAME,
 )
-from .card_service import CardStudio
-from .card_tools import CARD_MODEL_TOOLS, card_tool_parameters
-from .card_web import CardWeb
-from .domain import MODEL_TOOLS, Settings, StudioError, identify
-from .rendering import present
-from .service import PersonaStudio
-from .storage import Storage
-from .tool_schema import tool_parameters
+from .core.domain import MODEL_TOOLS, Settings, StudioError, identify
+from .core.storage import Storage
+from .personas.service import PersonaStudio
+from .personas.tools import tool_parameters
+from .presentation.rendering import present
 
 
 class PersonaStudioPlugin(Star):

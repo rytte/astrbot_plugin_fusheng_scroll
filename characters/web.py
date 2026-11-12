@@ -8,10 +8,10 @@ from astrbot.api import logger
 from astrbot.api.web import error_response, request
 from starlette.responses import Response
 
-from .branding import LEGACY_PLUGIN_NAME, PLUGIN_NAME
-from .card_assets import CardImage, data_image, prepare_image
-from .cards import MAX_UPLOAD_BYTES
-from .domain import StudioError, check_payload
+from ..core.branding import LEGACY_PLUGIN_NAME, PLUGIN_NAME
+from ..core.domain import StudioError, check_payload
+from .assets import CardImage, data_image, prepare_image
+from .codec import MAX_UPLOAD_BYTES
 
 PREFIX = "/" + PLUGIN_NAME
 LEGACY_PREFIX = "/" + LEGACY_PLUGIN_NAME

@@ -16,8 +16,8 @@ import aiohttp
 from PIL import Image, ImageOps, UnidentifiedImageError
 from yarl import URL
 
-from .cards import MAX_UPLOAD_BYTES, PNG_SIGNATURE, _chunk, _png_text, png_chunks
-from .domain import StudioError, digest
+from ..core.domain import StudioError, digest
+from .codec import MAX_UPLOAD_BYTES, PNG_SIGNATURE, _chunk, _png_text, png_chunks
 
 IMAGE_TYPES = {
     "PNG": ("image/png", "png"),

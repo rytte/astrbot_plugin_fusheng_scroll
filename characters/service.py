@@ -7,27 +7,7 @@ import time
 from astrbot.api import logger
 from astrbot.core.persona_mgr import SYSTEM_DEFAULT_PERSONA_ID
 
-from .card_assets import (
-    CardAssets,
-    CardImage,
-    image_info,
-    image_png,
-    main_icon,
-    prepare_image,
-    set_main_icon,
-)
-from .card_storage import CardStorage
-from .cards import (
-    DEFAULT_OPTIONS,
-    compile_card,
-    export_png,
-    from_persona,
-    import_card,
-    normalize_card,
-    persona_origin,
-    render_macros,
-)
-from .domain import (
+from ..core.domain import (
     CONTENT_FIELDS,
     Actor,
     StudioError,
@@ -38,6 +18,26 @@ from .domain import (
     validate_content,
     validate_id,
 )
+from .assets import (
+    CardAssets,
+    CardImage,
+    image_info,
+    image_png,
+    main_icon,
+    prepare_image,
+    set_main_icon,
+)
+from .codec import (
+    DEFAULT_OPTIONS,
+    compile_card,
+    export_png,
+    from_persona,
+    import_card,
+    normalize_card,
+    persona_origin,
+    render_macros,
+)
+from .storage import CardStorage
 from .worldbook import MAX_SCAN_CHARS, MAX_SCAN_DEPTH, evaluate_book
 
 CARD_ACTIONS = {
@@ -920,7 +920,7 @@ class CardStudio:
             card = self.storage.get(card_id)
             self.authorize(actor, card, allow_deleted=True)
             document = normalize_card(card["document"])
-        from .domain import canonical
+        from ..core.domain import canonical
 
         return (
             canonical(document).encode("utf-8"),

@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock
 import pytest
 from astrbot.api.platform import MessageType
 from astrbot.core.event_bus import UNIQUE_SESSION_ID_BUILDERS
-from astrbot_plugin_fusheng_scroll.domain import Settings, StudioError
+from astrbot_plugin_fusheng_scroll.core.domain import Settings, StudioError
 from astrbot_plugin_fusheng_scroll.main import PersonaStudioPlugin
 
 
@@ -220,7 +220,7 @@ async def test_group_switch_does_not_create_or_override_forced_conversations(
     )
     assert result["error"]["code"] == "no_current_conversation"
     monkeypatch.setattr(
-        "astrbot_plugin_fusheng_scroll.service.sp.get_async",
+        "astrbot_plugin_fusheng_scroll.personas.service.sp.get_async",
         AsyncMock(return_value={"persona_id": "forced"}),
     )
     result = await env.studio.execute(

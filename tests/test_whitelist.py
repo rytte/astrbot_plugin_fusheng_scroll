@@ -5,7 +5,7 @@ from unittest.mock import Mock
 
 import pytest
 from astrbot.api import AstrBotConfig
-from astrbot_plugin_fusheng_scroll.domain import Settings
+from astrbot_plugin_fusheng_scroll.core.domain import Settings
 from astrbot_plugin_fusheng_scroll.main import PersonaStudioPlugin
 
 
