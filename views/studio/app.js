@@ -205,7 +205,17 @@ function renderLibrary() {
   const visible=state.items.filter(c=>[c.name,c.description,...(c.tags||[])].join(' ').toLowerCase().includes(query));
   $('#card-count').textContent=String(state.activeCount);
   collectionScope();
-  $('#card-list').innerHTML=visible.map(c=>`<button class="card-item" data-card="${escape(c.card_id)}" aria-label="编辑角色：${escape(c.name)}"><span class="card-cover" data-cover="${escape(c.card_id)}"><span class="cover-letter" aria-hidden="true">${escape(Array.from(c.name)[0]||'✦')}</span><span class="cover-version">PERSONA / ${escape(c.character_version||'未定版')}</span><span class="cover-hint">${c.asset_id?'角色封面':'角色档案'}</span></span><span class="card-body"><span class="card-title-row"><span class="item-name">${escape(c.name)}</span>${syncBadge(c.sync_status)}</span><span class="card-description">${escape(c.description||(c.persona_import?'从 AstrBot 转入的角色，继续完善它的故事。':'故事还未写下，等待你来补全。'))}</span>${c.locked||c.deleted?`<span class="card-flags">${c.locked?'已锁定':''}${c.deleted?' 已归档':''}</span>`:''}<span class="card-footer"><span class="card-tags">${(c.tags?.length?c.tags.slice(0,2):[c.persona_import?'来自 AstrBot':'原创角色']).map(tag=>`<span class="tag">${escape(tag)}</span>`).join('')}</span><span class="card-edit">编辑角色 ${icon('arrow-up-right')}</span></span></span></button>`).join('') || `<div class="empty-state">${icon(query?'search':state.deleted?'archive':'user')}<h3>${query?'没有找到这个角色':state.deleted?'暂无已归档角色':'从一个角色，开始新的故事'}</h3><p>${query?'换个名称、简介或标签试试。':state.deleted?'归档的角色会保留在这里。':'新建角色，或导入已有的 JSON / PNG 角色卡。'}</p>${!query&&!state.deleted?'<div class="actions"><button data-action="new-empty" class="primary">新建角色</button><button data-action="import-empty">导入角色卡</button></div>':''}</div>`;
+  $('#card-list').innerHTML=visible.map(c=>`
+    <button class="card-item" data-card="${escape(c.card_id)}" aria-label="编辑角色：${escape(c.name)}">
+      <span class="card-cover" data-cover="${escape(c.card_id)}"><span class="cover-letter" aria-hidden="true">${escape(Array.from(c.name)[0]||'✦')}</span><span class="cover-version">人物小传</span><span class="cover-hint">故事待续</span></span>
+      <span class="card-body">
+        <span class="card-title-row"><span class="item-name">${escape(c.name)}</span><span class="card-version" title="角色版本：${escape(c.character_version||'未定版')}">${escape(c.character_version||'未定版')}</span></span>
+        <span class="card-description">${escape(c.description||(c.persona_import?'从 AstrBot 转入的角色，继续完善它的故事。':'故事还未写下，等待你来补全。'))}</span>
+        <span class="card-tags">${(c.tags?.length?c.tags.slice(0,2):[c.persona_import?'来自 AstrBot':'原创角色']).map(tag=>`<span class="tag">${escape(tag)}</span>`).join('')}</span>
+        ${c.locked||c.deleted?`<span class="card-flags">${c.locked?'已锁定':''}${c.deleted?' 已归档':''}</span>`:''}
+        <span class="card-footer">${syncBadge(c.sync_status)}<span class="card-edit">编辑角色 ${icon('arrow-up-right')}</span></span>
+      </span>
+    </button>`).join('') || `<div class="empty-state">${icon(query?'search':state.deleted?'archive':'book')}<h3>${query?'没有找到这个角色':state.deleted?'暂无已归档角色':'从一个角色，开始新的故事'}</h3><p>${query?'换个名称、简介或标签试试。':state.deleted?'归档的角色会保留在这里。':'新建角色，或导入已有的 JSON / PNG 角色卡。'}</p>${!query&&!state.deleted?'<div class="actions"><button data-action="new-empty" class="primary">新建角色</button><button data-action="import-empty">导入角色卡</button></div>':''}</div>`;
   const choices=state.current&&!state.items.some(c=>c.card_id===state.current.card_id)?[{card_id:state.current.card_id,name:state.current.document.data.name},...state.items]:state.items;
   $('#card-switcher').innerHTML=choices.map(c=>`<option value="${escape(c.card_id)}" ${c.card_id===state.current?.card_id?'selected':''}>${escape(c.name)}</option>`).join('');
   observeGallery();
