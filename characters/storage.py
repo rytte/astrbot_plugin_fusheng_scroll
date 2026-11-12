@@ -372,6 +372,23 @@ class CardStorage:
     def adopt(self, persona, document, options, owner) -> dict:
         return self._create(document, owner, options, persona=persona, reason="persona")
 
+    def builtin_card_id(self, builtin_id: str) -> str | None:
+        row = self.connection.execute(
+            "SELECT card_id FROM card_builtin_seeds WHERE builtin_id=?", (builtin_id,)
+        ).fetchone()
+        return row["card_id"] if row else None
+
+    def create_builtin(self, builtin_id, document, *, options, asset_id) -> dict:
+        """Persist the system-owned card and its one-time marker atomically."""
+        return self._create(
+            document,
+            None,
+            options,
+            asset_id=asset_id,
+            reason="builtin",
+            builtin_id=builtin_id,
+        )
+
     def _create(
         self,
         document,
@@ -382,10 +399,13 @@ class CardStorage:
         imported=None,
         persona=None,
         reason="create",
+        builtin_id=None,
     ):
         document = normalize_card(document)
         card_id, now = str(uuid.uuid4()), time.time()
         persona_id = persona["persona_id"] if persona else None
+        if builtin_id is not None:
+            persona_id = f"{document['data']['name'][:230]} · {card_id[:6]}"
         reference = record_ref(persona) if persona else None
         baseline = (
             {
@@ -410,7 +430,7 @@ class CardStorage:
                     persona_id,
                     reference,
                     canonical(baseline) if baseline else None,
-                    "synced" if persona else "unbound",
+                    "synced" if persona else "pending" if builtin_id else "unbound",
                     now,
                     now,
                 ),
@@ -418,6 +438,16 @@ class CardStorage:
             card = self.get(card_id)
             self._snapshot(card, reason)
             self._remember_persona(card_id, persona_id, reference)
+            if builtin_id is not None:
+                self.connection.execute(
+                    "INSERT INTO card_builtin_seeds VALUES (?, ?, ?, ?)",
+                    (
+                        builtin_id,
+                        card_id,
+                        document["data"]["character_version"],
+                        now,
+                    ),
+                )
             if imported:
                 self.connection.execute(
                     "UPDATE card_imports SET card_id=? WHERE import_id=?",

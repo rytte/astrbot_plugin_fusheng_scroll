@@ -10,6 +10,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools
 from astrbot.core.star.filter.command import GreedyStr
 
+from .characters.builtin import install_builtin_character
 from .characters.service import CardStudio
 from .characters.tools import CARD_MODEL_TOOLS, card_tool_parameters
 from .characters.web import CardWeb
@@ -75,6 +76,10 @@ class PersonaStudioPlugin(Star):
                 )
             self.web = CardWeb(self.context, self.cards)
             self.web.register()
+            try:
+                await install_builtin_character(self.cards)
+            except Exception as exc:
+                logger.warning(f"内置知绘初始化失败，插件其余功能继续可用：{exc}")
         except BaseException:
             if self.web is not None:
                 self.web.unregister()

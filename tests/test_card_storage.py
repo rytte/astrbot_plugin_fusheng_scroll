@@ -53,12 +53,40 @@ def test_v1_migration_preserves_owners_locks_and_backups(tmp_path):
         assert [
             tuple(r) for r in storage.connection.execute("SELECT * FROM backups")
         ] == before
-        assert storage.connection.execute("PRAGMA user_version").fetchone()[0] == 6
+        assert storage.connection.execute("PRAGMA user_version").fetchone()[0] == 7
         assert CardStorage(storage).list(Actor("", "", True)) == []
     finally:
         storage.close()
     reopened = Storage(path)
     reopened.close()
+
+
+def test_v6_migration_adds_seed_registry_without_changing_user_data(tmp_path):
+    path = tmp_path / "studio.sqlite3"
+    storage = Storage(path)
+    cards = CardStorage(storage)
+    card = cards.create(Actor("p", "u", False), new_card("已有知绘"))
+    before = list(storage.connection.execute("SELECT * FROM cards"))
+    snapshots = list(storage.connection.execute("SELECT * FROM card_snapshots"))
+    storage.connection.executescript(
+        "DROP TABLE card_builtin_seeds; PRAGMA user_version=6;"
+    )
+    storage.close()
+    migrated = Storage(path)
+    try:
+        assert migrated.connection.execute("PRAGMA user_version").fetchone()[0] == 7
+        assert list(migrated.connection.execute("SELECT * FROM cards")) == before
+        assert (
+            list(migrated.connection.execute("SELECT * FROM card_snapshots"))
+            == snapshots
+        )
+        assert (
+            CardStorage(migrated).get(card["card_id"])["document"] == card["document"]
+        )
+        assert CardStorage(migrated).builtin_card_id("builtin_zhihui") is None
+        assert migrated.connection.execute("PRAGMA foreign_key_check").fetchall() == []
+    finally:
+        migrated.close()
 
 
 def test_card_update_and_snapshot_rollback_as_one_transaction(tmp_path):
@@ -102,7 +130,7 @@ def test_v2_migration_preserves_cards_and_remembers_existing_bindings(tmp_path):
         storage.connection.execute("SELECT * FROM card_snapshots").fetchone()
     )
     storage.connection.executescript(
-        "DROP TABLE card_asset_garbage; DROP TABLE card_deleted_personas; DROP TABLE card_image_uploads; DROP TABLE card_asset_cache; DROP TABLE card_persona_sources; PRAGMA user_version=2;"
+        "DROP TABLE card_builtin_seeds; DROP TABLE card_asset_garbage; DROP TABLE card_deleted_personas; DROP TABLE card_image_uploads; DROP TABLE card_asset_cache; DROP TABLE card_persona_sources; PRAGMA user_version=2;"
     )
     storage.close()
     migrated = Storage(path)
@@ -134,12 +162,12 @@ def test_v3_migration_adds_cache_without_changing_old_snapshots_or_assets(tmp_pa
         card["card_id"], cards.snapshots(card["card_id"])[0]["snapshot_id"]
     )
     storage.connection.executescript(
-        "DROP TABLE card_asset_garbage; DROP TABLE card_deleted_personas; DROP TABLE card_image_uploads; DROP TABLE card_asset_cache; PRAGMA user_version=3;"
+        "DROP TABLE card_builtin_seeds; DROP TABLE card_asset_garbage; DROP TABLE card_deleted_personas; DROP TABLE card_image_uploads; DROP TABLE card_asset_cache; PRAGMA user_version=3;"
     )
     storage.close()
     migrated = Storage(path)
     try:
-        assert migrated.connection.execute("PRAGMA user_version").fetchone()[0] == 6
+        assert migrated.connection.execute("PRAGMA user_version").fetchone()[0] == 7
         cards = CardStorage(migrated)
         assert cards.snapshot(card["card_id"], before["snapshot_id"]) == before
         assert cards.cached_asset("nonexistent") is None
@@ -157,12 +185,12 @@ def test_v4_migration_preserves_cached_images_and_existing_snapshots(tmp_path):
         card["card_id"], cards.snapshots(card["card_id"])[0]["snapshot_id"]
     )
     storage.connection.executescript(
-        "DROP TABLE card_asset_garbage; DROP TABLE card_deleted_personas; DROP TABLE card_image_uploads; PRAGMA user_version=4;"
+        "DROP TABLE card_builtin_seeds; DROP TABLE card_asset_garbage; DROP TABLE card_deleted_personas; DROP TABLE card_image_uploads; PRAGMA user_version=4;"
     )
     storage.close()
     migrated = Storage(path)
     try:
-        assert migrated.connection.execute("PRAGMA user_version").fetchone()[0] == 6
+        assert migrated.connection.execute("PRAGMA user_version").fetchone()[0] == 7
         cards = CardStorage(migrated)
         assert cards.snapshot(card["card_id"], before["snapshot_id"]) == before
         assert cards.cached_asset("existing-key")["asset_id"] == "a" * 64 + ".png"
@@ -184,12 +212,12 @@ def test_v5_migration_preserves_cards_sources_and_assets(tmp_path):
     cards.sync_state(card["card_id"], "synced", persona_id="旧人格", persona_ref="ref")
     before = cards.get(card["card_id"])
     storage.connection.executescript(
-        "DROP TABLE card_deleted_personas; DROP TABLE card_asset_garbage; PRAGMA user_version=5;"
+        "DROP TABLE card_builtin_seeds; DROP TABLE card_deleted_personas; DROP TABLE card_asset_garbage; PRAGMA user_version=5;"
     )
     storage.close()
     storage = Storage(path)
     try:
-        assert storage.connection.execute("PRAGMA user_version").fetchone()[0] == 6
+        assert storage.connection.execute("PRAGMA user_version").fetchone()[0] == 7
         assert CardStorage(storage).get(card["card_id"]) == before
         assert CardStorage(storage).known_personas() == (
             {"旧人格"},

@@ -57,7 +57,7 @@ class Storage:
                     PRAGMA user_version = 1;
                     COMMIT;
                 """)
-            elif version not in (1, 2, 3, 4, 5, 6):
+            elif version not in (1, 2, 3, 4, 5, 6, 7):
                 raise StudioError(
                     "storage_error", "不支持的权限数据库版本，不进行兼容迁移。"
                 )
@@ -136,6 +136,17 @@ class Storage:
                         asset_id TEXT PRIMARY KEY
                     );
                     PRAGMA user_version = 6;
+                    COMMIT;
+                """)
+            if version in (0, 1, 2, 3, 4, 5, 6):
+                # No foreign key: deleting a seeded card must not reset installation.
+                self.connection.executescript("""
+                    BEGIN;
+                    CREATE TABLE card_builtin_seeds (
+                        builtin_id TEXT PRIMARY KEY, card_id TEXT NOT NULL,
+                        character_version TEXT NOT NULL, created_at REAL NOT NULL
+                    );
+                    PRAGMA user_version = 7;
                     COMMIT;
                 """)
             if self.connection.execute("PRAGMA integrity_check").fetchone()[0] != "ok":

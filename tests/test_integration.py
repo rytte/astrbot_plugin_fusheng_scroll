@@ -188,7 +188,7 @@ for name in (*entry.MODEL_TOOLS, *entry.CARD_MODEL_TOOLS):
 related = set(PluginManager._get_plugin_related_modules(directory))
 for module in (
     "core.branding", "core.domain", "core.storage",
-    "characters.assets", "characters.codec", "characters.service", "characters.storage",
+    "characters.assets", "characters.builtin", "characters.codec", "characters.service", "characters.storage",
     "characters.tools", "characters.web", "characters.worldbook",
     "personas.service", "personas.tools", "presentation.rendering", "presentation.templates",
 ):
@@ -196,6 +196,9 @@ for module in (
     loaded = importlib.import_module(name)
     assert Path(loaded.__file__).resolve().is_relative_to(Path("data/plugins", directory).resolve())
     assert name in related, name
+from importlib import import_module
+builtin = import_module(f"{prefix}.characters.builtin")
+assert builtin.BUILTIN_CARD_PATH.is_file()
 """
     result = subprocess.run(
         [sys.executable, "-c", script, directory],
