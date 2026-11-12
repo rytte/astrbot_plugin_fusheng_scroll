@@ -461,6 +461,28 @@ def compile_card(card: dict) -> dict:
         prompt += "\n\n## 示例对话原文\n" + data["mes_example"]
         examples = []
         warnings.append("示例对话包含非标准段落，已保留原文并放入人格提示词。")
+    example_blocks = []
+    if native_dialogs and begin_dialogs and len(begin_dialogs) % 2 == 0:
+        # Preserve native dialog bodies literally, including whitespace and macros.
+        example_blocks.append(
+            "<START>\n"
+            + "\n".join(
+                f"{'用户' if i % 2 == 0 else data['name']}: {text}"
+                for i, text in enumerate(begin_dialogs)
+            )
+        )
+    for block in examples:
+        example_blocks.append(
+            "<START>\n"
+            + "\n".join(
+                f"{'用户' if m['role'] == 'user' else data['name']}: "
+                + render_macros(m["content"], data["name"])
+                for m in block
+            )
+        )
+    example_prompt = (
+        "## 示例对话\n\n" + "\n\n".join(example_blocks) if example_blocks else ""
+    )
     warnings.extend(book_warnings(data.get("character_book")))
     if any(key != PERSONA_EXTENSION for key in data.get("extensions", {})) or (
         data.get("extensions") and not origin
@@ -478,6 +500,7 @@ def compile_card(card: dict) -> dict:
         "system_prompt": prompt,
         "begin_dialogs": begin_dialogs,
         "examples": examples,
+        "example_prompt": example_prompt,
         "literal_system_prompt": literal_prompt,
         "persona_import": origin is not None,
         "warnings": warnings,

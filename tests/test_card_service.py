@@ -691,16 +691,14 @@ async def test_core_lock_blocks_card_update_and_legacy_writes(cards):
     assert cards.cards.storage.get(c["card_id"])["revision"] == c["revision"]
 
 
-async def test_request_macros_examples_greeting_are_temporary_and_idempotent(cards):
+async def test_request_macros_examples_are_temporary_and_idempotent(cards):
     c = await create(cards)
     c = await change(
         cards,
         c,
         data={
-            "first_mes": "你好 {{user}}",
-            "alternate_greetings": ["备用"],
             "post_history_instructions": "{{char}} 保持角色",
-            "mes_example": "<START>\n{{user}}: 示例\n{{char}}: 回答",
+            "mes_example": "<START>\n{{user}}: 示例\n{{char}}: 回答\n<START>\n{{char}}: 独立示例",
         },
     )
     cards.event.set_extra("_trace_persona_id", c["persona_id"])
@@ -711,12 +709,16 @@ async def test_request_macros_examples_greeting_are_temporary_and_idempotent(car
     )
     await cards.cards.apply_request(cards.event, req)
     assert req.prompt == "真实提问" and "爱莉" in req.system_prompt
-    assert [m["content"] for m in req.contexts] == ["示例", "回答", "你好 user"]
-    assert all(m["_no_save"] for m in req.contexts)
+    section = (
+        "## 示例对话\n\n<START>\n用户: 示例\n爱莉: 回答\n\n<START>\n爱莉: 独立示例"
+    )
+    assert req.system_prompt.endswith(section)
+    assert req.contexts == []
     assert req.extra_user_content_parts[0]._no_save
     before = copy.deepcopy(req)
     await cards.cards.apply_request(cards.event, req)
     assert req.contexts == before.contexts and len(req.extra_user_content_parts) == 1
+    assert req.system_prompt == before.system_prompt
     dumped = dump_messages_with_checkpoints(
         [
             Message(
@@ -733,11 +735,105 @@ async def test_request_macros_examples_greeting_are_temporary_and_idempotent(car
     )
     original = copy.deepcopy(req2.contexts)
     await cards.cards.apply_request(cards.event, req2)
-    assert len(req2.contexts) == 3 and req2.contexts[-1] == original[0]
+    assert req2.contexts == original
+    assert req2.system_prompt.endswith(section)
     await cards.manager.update_persona(c["persona_id"], begin_dialogs=["外部", "变更"])
     req3 = ProviderRequest(system_prompt=c["compiled"]["system_prompt"], contexts=[])
     await cards.cards.apply_request(cards.event, req3)
     assert req3.contexts == []
+
+
+@pytest.mark.parametrize("group", [False, True], ids=["private", "group"])
+@pytest.mark.parametrize("instruction", ["", "{{original}}\n{{char}} 认识 {{user}}"])
+async def test_user_macro_keeps_request_prefix_stable_across_senders_and_renames(
+    cards, group, instruction
+):
+    c = await create(cards)
+    c = await change(
+        cards,
+        c,
+        data={
+            "system_prompt": instruction,
+            "description": "{{char}} 和 {{user}} 是朋友",
+            "personality": "{{char}} 对 {{user}} 很随和",
+            "scenario": "{{char}} 与 {{user}} 在书房",
+            "mes_example": "{{user}}: {{user}} 向 {{char}} 提问\n{{char}}: 我认识 {{user}}",
+            "post_history_instructions": "{{char}} 与 {{user}} 继续聊天",
+        },
+    )
+    original_core = await cards.studio.current(c["persona_id"])
+    history = [{"role": "user", "content": "甲昵称说：原始历史 {{user}}"}]
+    rendered = []
+    for sender_id, nickname in (
+        ("sender-a", "甲昵称"),
+        ("sender-b", "乙昵称"),
+        ("sender-a", "改名后的甲"),
+    ):
+        event = cards.native_event(sender_id, group=group)
+        event.message_obj.sender.nickname = nickname
+        event.set_extra("_trace_persona_id", c["persona_id"])
+        req = ProviderRequest(
+            prompt="真实提问 {{user}}",
+            system_prompt=c["compiled"]["system_prompt"],
+            contexts=copy.deepcopy(history),
+        )
+        await cards.cards.apply_request(event, req)
+        assert req._persona_studio_applied
+        assert "以 爱莉 的身份与 用户 自然交流" in req.system_prompt
+        assert "爱莉 和 用户 是朋友" in req.system_prompt
+        assert "爱莉 对 用户 很随和" in req.system_prompt
+        assert "爱莉 与 用户 在书房" in req.system_prompt
+        assert "{{user}}" not in req.system_prompt
+        assert (
+            "## 示例对话\n\n<START>\n用户: 用户 向 爱莉 提问\n爱莉: 我认识 用户"
+            in req.system_prompt
+        )
+        assert req.contexts == history
+        assert req.prompt == "真实提问 {{user}}"
+        supplement = [part.text for part in req.extra_user_content_parts]
+        assert supplement == ["[角色补充指令]\n爱莉 与 用户 继续聊天"]
+        rendered.append((req.system_prompt, req.contexts, supplement))
+    assert rendered[0] == rendered[1] == rendered[2]
+    raw, _, _ = await cards.cards.export(cards.actor, c["card_id"])
+    assert json.loads(raw) == c["document"]
+    assert await cards.studio.current(c["persona_id"]) == original_core
+
+
+@pytest.mark.parametrize("group", [False, True], ids=["private", "group"])
+@pytest.mark.parametrize("with_history", [False, True], ids=["new", "existing"])
+@pytest.mark.parametrize("greeting_index", [0, 1, 9])
+async def test_greetings_are_preserved_but_not_used_in_requests(
+    cards, group, with_history, greeting_index
+):
+    c = await create(cards)
+    greetings = {
+        "first_mes": "主开场白 {{user}}",
+        "alternate_greetings": ["备用开场白 {{char}}"],
+        "group_only_greetings": ["群聊主开场白", "群聊备用开场白"],
+    }
+    c = await change(
+        cards, c, data=greetings, options={"greeting_index": greeting_index}
+    )
+    event = cards.native_event(group=group)
+    event.set_extra("_trace_persona_id", c["persona_id"])
+    history = [{"role": "user", "content": "之前的对话"}] if with_history else []
+    req = ProviderRequest(
+        prompt="真实提问",
+        system_prompt=c["compiled"]["system_prompt"],
+        contexts=copy.deepcopy(history),
+    )
+    await cards.cards.apply_request(event, req)
+    assert req._persona_studio_applied
+    assert req.contexts == history
+    assert req.prompt == "真实提问"
+    assert "开场白" not in req.system_prompt
+    assert req.extra_user_content_parts == []
+    event.send.assert_not_awaited()
+    core = await cards.studio.current(c["persona_id"])
+    assert core["begin_dialogs"] == [] and "开场白" not in core["system_prompt"]
+    raw, _, _ = await cards.cards.export(cards.actor, c["card_id"])
+    exported = json.loads(raw)["data"]
+    assert {key: exported[key] for key in greetings} == greetings
 
 
 async def test_request_injection_is_excluded_by_actual_core_history_writer(cards):
@@ -754,7 +850,6 @@ async def test_request_injection_is_excluded_by_actual_core_history_writer(cards
         cards,
         c,
         data={
-            "first_mes": "临时开场",
             "mes_example": "{{user}}: 示例\n{{char}}: 示例答",
             "post_history_instructions": "临时指令",
             "character_book": {
@@ -852,13 +947,14 @@ async def test_worldbook_runtime_matches_preview_without_persisting_or_leaking(c
         + "\n\n".join(
             [
                 preview["before"],
-                c["compiled"]["system_prompt"].replace("{{user}}", "user"),
+                c["compiled"]["system_prompt"].replace("{{user}}", "用户"),
+                c["compiled"]["example_prompt"],
                 preview["after"],
             ]
         )
         + "\n其他插件"
     )
-    assert "爱莉 带 user" in req.system_prompt and "不可串会话" not in req.system_prompt
+    assert "爱莉 带 用户" in req.system_prompt and "不可串会话" not in req.system_prompt
     assert contexts == [
         {"role": "assistant", "content": [{"type": "text", "text": "去白塔"}]}
     ]

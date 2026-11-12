@@ -338,7 +338,7 @@ class CardStudio:
                 document = normalize_card(payload["card"])
                 prompt = payload["prompt"]
                 history = payload.get("history", [])
-                username = payload.get("username", "访客")
+                username = payload.get("username", "用户")
                 if not isinstance(prompt, str) or len(prompt) > MAX_SCAN_CHARS:
                     raise StudioError(
                         "invalid_payload", f"测试消息最多 {MAX_SCAN_CHARS} 字符。"
@@ -360,7 +360,7 @@ class CardStudio:
                     data.get("character_book"),
                     prompt,
                     [{"role": "user", "content": t} for t in history],
-                    render=lambda text: render_macros(text, data["name"], username),
+                    render=lambda text: render_macros(text, data["name"]),
                 )
             if action == "list":
                 if type(payload.get("deleted", False)) is not bool:
@@ -946,10 +946,10 @@ class CardStudio:
             if compiled["system_prompt"] not in (req.system_prompt or ""):
                 return
             data = card["document"]["data"]
-            name = event.get_sender_name() or event.get_sender_id() or "用户"
 
             def render(text):
-                return render_macros(text, data["name"], name)
+                # Keep the card prefix stable across senders and nickname changes.
+                return render_macros(text, data["name"])
 
             book = evaluate_book(
                 data.get("character_book"), req.prompt, req.contexts, render=render
@@ -962,42 +962,36 @@ class CardStudio:
                 rendered_prompt = render(prompt)
             rendered_prompt = "\n\n".join(
                 part
-                for part in (book["before"], rendered_prompt, book["after"])
+                for part in (
+                    book["before"],
+                    rendered_prompt,
+                    compiled["example_prompt"],
+                    book["after"],
+                )
                 if part
             )
             if prompt:
                 req.system_prompt = req.system_prompt.replace(
                     prompt, rendered_prompt, 1
                 )
-            elif book["before"] or book["after"]:
+            elif rendered_prompt:
                 req.system_prompt = "\n\n".join(
                     part for part in (req.system_prompt, rendered_prompt) if part
                 )
-            examples = []
-            for block in compiled["examples"]:
-                examples.extend(
+            # Core inserts native presets before history. Move only that exact
+            # temporary prefix into the system section, leaving real history intact.
+            dialogs = compiled["begin_dialogs"]
+            if dialogs and len(dialogs) % 2 == 0:
+                presets = [
                     {
-                        "role": m["role"],
-                        "content": render(m["content"]),
+                        "role": "user" if i % 2 == 0 else "assistant",
+                        "content": text,
                         "_no_save": True,
                     }
-                    for m in block
-                )
-            history = [m for m in req.contexts if not m.get("_no_save")]
-            if not history:
-                greetings = [data["first_mes"], *data["alternate_greetings"]]
-                if not event.is_private_chat() and data.get("group_only_greetings"):
-                    greetings = data["group_only_greetings"]
-                index = card["options"]["greeting_index"]
-                if index < len(greetings) and greetings[index]:
-                    examples.append(
-                        {
-                            "role": "assistant",
-                            "content": render(greetings[index]),
-                            "_no_save": True,
-                        }
-                    )
-            req.contexts = examples + copy.deepcopy(req.contexts)
+                    for i, text in enumerate(dialogs)
+                ]
+                if req.contexts[: len(presets)] == presets:
+                    req.contexts = copy.deepcopy(req.contexts[len(presets) :])
             if data["post_history_instructions"].strip():
                 # Appended to the current input, after history, only for this request.
                 from astrbot.core.agent.message import TextPart

@@ -322,7 +322,7 @@ function renderPanel() {
   const d=state.document.data, c=state.current;
   const hint='<label class="key-toggle"><input type="checkbox" id="show-keys" '+(state.showKeys?'checked':'')+'>显示原始字段名</label>';
   if(state.tab==='character') $('#panel').innerHTML=`<div class="panel-heading"><h3>角色档案</h3>${hint}</div><div class="form"><div class="two-columns identity-fields">${field('角色名称','name',d.name)}${field('角色版本','character_version',d.character_version,{hint:'修改版本并保存时留存快照'})}</div>${field('角色描述','description',d.description,{area:true,rows:5})}${field('性格与表达方式','personality',d.personality,{area:true})}${field('场景','scenario',d.scenario,{area:true})}<details class="metadata-fields"><summary>作者、标签与备注</summary><div class="form"><div class="two-columns">${field('作者','creator',d.creator)}${tagField()}</div>${field('创作者备注','creator_notes',d.creator_notes,{area:true,hint:'用于管理和导出，默认不进入模型上下文'})}</div></details></div>`;
-  if(state.tab==='dialogue') $('#panel').innerHTML=`<div class="form">${field('角色指令','system_prompt',d.system_prompt,{area:true,hint:c.compiled.persona_import?'从 AstrBot 转入的原提示词原样保留；编辑后支持角色卡文本宏':'为空时使用默认角色指令；支持 {{char}}、{{user}} 和 {{original}}'})}${field('历史后指令','post_history_instructions',d.post_history_instructions,{area:true,hint:'作为本轮临时补充内容附在用户消息后，不修改已存历史'})}${field('示例对话','mes_example',d.mes_example,{area:true,rows:6,hint:c.compiled.persona_import?'原预设对话未编辑时按 AstrBot 原方式运行；编辑后使用角色卡示例格式':'支持 <START>、{{user}}: 和 {{char}}:；无法解析的格式保留为提示词原文'})}${field('开场白','first_mes',d.first_mes,{area:true,hint:'新对话的角色背景消息，不会重复写入聊天历史'})}${greetings('alternate_greetings','备用开场白')}${greetings('group_only_greetings','群聊开场白')}<label class="field"><span class="field-label">默认开场白</span><select data-scope="options-number" data-field="greeting_index">${[d.first_mes,...d.alternate_greetings].map((v,i)=>`<option value="${i}" ${state.options.greeting_index===i?'selected':''}>${i===0?'主开场白':`备用 ${i}`} · ${escape(v.slice(0,25)||'空白')}</option>`).join('')}</select><span class="field-help">有群聊专用开场白时使用群聊列表中的同一序号；超出序号时不注入。</span></label></div>`;
+  if(state.tab==='dialogue') $('#panel').innerHTML=`<div class="form">${field('角色指令','system_prompt',d.system_prompt,{area:true,hint:c.compiled.persona_import?'从 AstrBot 转入的原提示词原样保留；编辑后支持角色卡文本宏':'为空时使用默认角色指令；{{char}} 为角色名，{{user}} 固定为“用户”，{{original}} 引用默认指令'})}${field('历史后指令','post_history_instructions',d.post_history_instructions,{area:true,hint:'作为本轮临时补充内容附在用户消息后，不修改已存历史'})}${field('示例对话','mes_example',d.mes_example,{area:true,rows:6,hint:c.compiled.persona_import?'原预设正文按字面保留，放入系统提示词的独立段落；编辑后支持角色卡示例格式':'支持 <START>、{{user}}: 和 {{char}}:；分组放入系统提示词，无法解析时保留原文'})}<label class="field"><span class="field-label">默认开场白</span><select data-scope="options-number" data-field="greeting_index">${[d.first_mes,...d.alternate_greetings].map((v,i)=>`<option value="${i}" ${state.options.greeting_index===i?'selected':''}>${i===0?'主开场白':`备用 ${i}`} · ${escape(v.slice(0,25)||'空白')}</option>`).join('')}</select><span class="field-help">选择运行预览中展示的开场白，当前不参与实际对话。</span></label>${field('开场白','first_mes',d.first_mes,{area:true,hint:'保留编辑、预览和导出，当前不参与对话'})}${greetings('alternate_greetings','备用开场白')}${greetings('group_only_greetings','群聊开场白')}</div>`;
   if(state.tab==='images') renderImagePanel();
   if(state.tab==='worldbook')worldbook.render();
   if(state.tab==='astrbot') renderAstrbot();
@@ -340,7 +340,8 @@ function renderImagePanel() {
 }
 function greetings(key,label) {
   const values=state.document.data[key]||[];
-  return `<section><div class="row"><h3>${label}</h3><button data-add-greeting="${key}">添加</button></div>${values.map((v,i)=>`<div class="greeting-entry"><label class="field"><span class="field-label">${label} ${i+1}</span><textarea data-greeting="${key}" data-index="${i}" rows="3">${escape(v)}</textarea></label><button class="quiet" data-remove-greeting="${key}" data-index="${i}">移除此条</button></div>`).join('')}</section>`;
+  const entryLabel=key==='group_only_greetings'?'群聊':'备选';
+  return `<section class="greeting-group" aria-labelledby="${key}-heading"><div class="greeting-group-header"><h3 id="${key}-heading">${label}<span class="greeting-count">${values.length} 条</span></h3><button type="button" class="quiet greeting-add" data-add-greeting="${key}" aria-label="添加${label}">${icon('plus')}添加</button></div><div class="greeting-list">${values.map((v,i)=>`<div class="greeting-entry"><div class="greeting-entry-toolbar"><label class="greeting-entry-label" for="greeting-${key}-${i}">${entryLabel}<span class="greeting-index">${String(i+1).padStart(2,'0')}</span></label><button type="button" class="quiet greeting-remove" data-remove-greeting="${key}" data-index="${i}" aria-label="移除${label} ${i+1}">${icon('x')}移除</button></div><textarea id="greeting-${key}-${i}" data-greeting="${key}" data-index="${i}" rows="2" aria-label="${label} ${i+1}">${escape(v)}</textarea></div>`).join('')||`<p class="greeting-empty">尚未添加${label}</p>`}</div></section>`;
 }
 function capability(key,label) {
   const value=state.options[key]; const mode=value===null?'all':value.length?'list':'none';
@@ -365,13 +366,12 @@ function renderPreview() {
       const result=await post('preview',{card,options});
       if(revision!==previewRevision || !state.current || !state.previewOpen)return;
       const d=result.document.data, compiled=result.compiled;
-      const replace=text=>String(text||'').replace(/\{\{(char|user)\}\}/g,(_,key)=>key==='char'?d.name:'访客');
+      const replace=text=>String(text||'').replace(/\{\{(char|user)\}\}/g,(_,key)=>key==='char'?d.name:'用户');
       const original=compiled.literal_system_prompt?d.extensions?.astrbot_persona_studio?.persona_import?.persona?.system_prompt||'':'';
-      const prompt=original+replace(compiled.system_prompt.slice(original.length));
-      const messages=[...(compiled.begin_dialogs||[]).map((content,i)=>({role:i%2?'assistant':'user',content})),...compiled.examples.flat().map(m=>({...m,content:replace(m.content)}))];
+      const prompt=[original+replace(compiled.system_prompt.slice(original.length)),compiled.example_prompt].filter(Boolean).join('\n\n');
       const greetings=[d.first_mes,...d.alternate_greetings];
       const book=d.character_book?.entries?.length||0;
-      $('#preview').innerHTML=`<div class="preview-head"><h2>运行预览</h2><button class="quiet icon-button" data-action="preview" aria-label="收起运行预览">${icon('x')}</button></div><p class="small muted">实际编译结果 · 用户名示例：访客</p><div class="preview-columns"><section class="section"><div class="section-label">选定开场白（私聊）</div><div class="greeting">${escape(replace(greetings[options.greeting_index])||'未设置')}</div></section><section class="section"><div class="section-label">人格提示词</div><pre>${escape(prompt)}</pre></section><section class="section"><div class="section-label">示例与预设对话</div><pre>${escape(messages.map(m=>`${m.role}: ${m.content}`).join('\n')||'未设置')}</pre></section>${d.post_history_instructions?`<section class="section"><div class="section-label">历史后临时补充</div><pre>${escape(replace(d.post_history_instructions))}</pre></section>`:''}<section class="section"><div class="section-label">世界书</div><p class="small">${book?`${book} 条设定 · 按每轮对话触发`:'未附带世界书'}</p><p class="small muted">在“世界书”页签输入测试消息，查看实际注入内容。</p></section>${compiled.warnings.length?`<section class="section"><div class="section-label">适配说明</div>${compiled.warnings.map(w=>`<p class="small muted">${escape(w)}</p>`).join('')}</section>`:''}</div>`;
+      $('#preview').innerHTML=`<div class="preview-head"><h2>运行预览</h2><button class="quiet icon-button" data-action="preview" aria-label="收起运行预览">${icon('x')}</button></div><p class="small muted">实际编译结果 · 用户称呼固定为“用户”</p><div class="preview-columns"><section class="section"><div class="section-label">选定开场白（私聊）</div><div class="greeting">${escape(replace(greetings[options.greeting_index])||'未设置')}</div><p class="small muted">仅供预览，当前不参与对话。</p></section><section class="section"><div class="section-label">人格提示词</div><pre>${escape(prompt)}</pre></section>${d.post_history_instructions?`<section class="section"><div class="section-label">历史后临时补充</div><pre>${escape(replace(d.post_history_instructions))}</pre></section>`:''}<section class="section"><div class="section-label">世界书</div><p class="small">${book?`${book} 条设定 · 按每轮对话触发`:'未附带世界书'}</p><p class="small muted">在“世界书”页签输入测试消息，查看实际注入内容。</p></section>${compiled.warnings.length?`<section class="section"><div class="section-label">适配说明</div>${compiled.warnings.map(w=>`<p class="small muted">${escape(w)}</p>`).join('')}</section>`:''}</div>`;
     }catch(error){if(revision===previewRevision)$('#preview').innerHTML=`<h2>运行预览</h2><p class="warning">${escape(error.message)}</p>`;}
   },250);
 }
@@ -549,8 +549,17 @@ document.addEventListener('click',event=>{
     state.tab=nextTab;render();focusTab();return;
   }
   if((button.dataset.addGreeting || button.dataset.removeGreeting) && (state.current.locked || state.current.deleted))return;
-  if(button.dataset.addGreeting){(state.document.data[button.dataset.addGreeting]??=[]).push('');renderPanel();updateSavebar();return;}
-  if(button.dataset.removeGreeting){state.document.data[button.dataset.removeGreeting].splice(Number(button.dataset.index),1);renderPanel();renderPreview();updateSavebar();return;}
+  if(button.dataset.addGreeting){
+    const key=button.dataset.addGreeting, values=state.document.data[key]??=[];
+    values.push('');renderPanel();updateSavebar();
+    document.getElementById(`greeting-${key}-${values.length-1}`).focus();return;
+  }
+  if(button.dataset.removeGreeting){
+    const key=button.dataset.removeGreeting, index=Number(button.dataset.index);
+    state.document.data[key].splice(index,1);renderPanel();renderPreview();updateSavebar();
+    const next=document.getElementById(`greeting-${key}-${Math.min(index,state.document.data[key].length-1)}`)||document.querySelector(`[data-add-greeting="${key}"]`);
+    next.focus({preventScroll:true});return;
+  }
   if(button.dataset.snapshot){busy(async()=>{
     const result=await post('snapshot',{card_id:state.current.card_id,snapshot_id:button.dataset.snapshot});
     modal(`版本 ${result.character_version||'未设置'} · 与当前内容比较`,diffHtml({...state.document.data,'AstrBot options':state.options},{...result.snapshot.document.data,'AstrBot options':result.snapshot.options})+`<details class="section"><summary>查看完整快照</summary><pre>${escape(JSON.stringify(result.snapshot,null,2))}</pre></details><div class="dialog-footer"><button data-action="restore" data-id="${result.snapshot_id}" class="primary" ${state.current.locked?'disabled':''}>恢复此快照</button></div>`);

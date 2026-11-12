@@ -93,8 +93,10 @@ async def test_worldbook_preserves_literal_native_prompt_and_ignores_presets(
     )
     env.event.set_extra("_trace_persona_id", card["persona_id"])
     await env.cards.apply_request(env.event, req)
-    assert "原有人格 与 user 的本轮背景" in req.system_prompt
+    assert "原有人格 与 用户 的本轮背景" in req.system_prompt
     assert "预设不应触发此条" not in req.system_prompt
+    assert "## 示例对话\n\n<START>\n用户: 白塔\n原有人格: 预设回答" in req.system_prompt
+    assert req.contexts == []
     assert req.system_prompt.startswith("外部系统\n" + prompt)
     assert (await env.studio.current(card["persona_id"]))["system_prompt"] == prompt
 
@@ -124,6 +126,11 @@ def test_conversion_preserves_native_prompt_dialogs_and_source(dialogs):
     compiled = compile_card(document)
     assert compiled["system_prompt"] == persona["system_prompt"]
     assert compiled["begin_dialogs"] == (dialogs or []) and compiled["examples"] == []
+    if dialogs and len(dialogs) % 2 == 0:
+        assert compiled["example_prompt"].startswith("## 示例对话\n\n<START>\n")
+        assert all(text in compiled["example_prompt"] for text in dialogs)
+    else:
+        assert compiled["example_prompt"] == ""
     assert persona == before
     if dialogs:
         document["data"]["mes_example"] = "{{user}}: 新示例\n{{char}}: 新回答"
@@ -265,22 +272,36 @@ async def test_conversion_respects_core_locks_and_reuses_original_identity(conve
     assert current["begin_dialogs"] == persona["begin_dialogs"]
 
 
-async def test_native_request_is_unchanged_then_edited_examples_are_injected_once(
+async def test_native_presets_move_to_system_then_edited_examples_are_applied_once(
     conversion,
 ):
     env = conversion
     persona = await legacy(env)
     card = await get_converted(env)
     env.event.set_extra("_trace_persona_id", persona["persona_id"])
-    contexts = env.manager.get_persona_v3_by_id(persona["persona_id"])[
+    presets = env.manager.get_persona_v3_by_id(persona["persona_id"])[
         "_begin_dialogs_processed"
     ]
+    history = [
+        {"role": "user", "content": persona["begin_dialogs"][0]},
+        {"role": "assistant", "content": persona["begin_dialogs"][1]},
+        {"role": "user", "content": "其他插件临时消息", "_no_save": True},
+    ]
+    contexts = copy.deepcopy(presets + history)
     request = ProviderRequest(
         system_prompt=persona["system_prompt"], contexts=copy.deepcopy(contexts)
     )
     await env.cards.apply_request(env.event, request)
-    assert request.system_prompt == persona["system_prompt"]
-    assert request.contexts == contexts
+    assert request.system_prompt == (
+        persona["system_prompt"] + "\n\n" + card["compiled"]["example_prompt"]
+    )
+    assert request.contexts == history
+    assert contexts == presets + history
+    assert await env.studio.current(persona["persona_id"]) == persona
+    before = copy.deepcopy(request)
+    await env.cards.apply_request(env.event, request)
+    assert request.system_prompt == before.system_prompt
+    assert request.contexts == before.contexts
     card = await mutate(
         env,
         card,
@@ -293,9 +314,14 @@ async def test_native_request_is_unchanged_then_edited_examples_are_injected_onc
     assert current["begin_dialogs"] == []
     request = ProviderRequest(system_prompt=current["system_prompt"], contexts=[])
     await env.cards.apply_request(env.event, request)
-    assert [m["content"] for m in request.contexts] == ["新示例", "新回答"]
+    assert (
+        "## 示例对话\n\n<START>\n用户: 新示例\n原有人格: 新回答"
+        in request.system_prompt
+    )
+    assert request.contexts == []
+    before_prompt = request.system_prompt
     await env.cards.apply_request(env.event, request)
-    assert len(request.contexts) == 2
+    assert request.contexts == [] and request.system_prompt == before_prompt
     assert len(card["snapshots"]) == 2
     card = await mutate(
         env, card, "restore", snapshot_id=card["snapshots"][-1]["snapshot_id"]

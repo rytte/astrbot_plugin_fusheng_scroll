@@ -409,7 +409,7 @@ async def test_worldbook_preview_unsaved_draft_validation_and_no_side_effects(we
     assert response.status_code == 200, response.text
     result = response.json()["data"]
     assert result["entries"][0]["matched_keys"] == ["白塔"]
-    assert "爱莉 认识 访客" in result["after"]
+    assert "爱莉 认识 用户" in result["after"]
     assert web.cards.storage.list(Actor("", "", True)) == []
     for patch in (
         {"prompt": []},
@@ -640,13 +640,14 @@ async def test_worldbook_editor_end_to_end_in_browser(web, tmp_path):
     document = new_card("爱莉")
     document["data"].update(
         description="温柔的旅行者，喜欢探索白塔与山间的旧城。",
+        mes_example="<START>\n{{user}}: 第一组提问\n{{char}}: 第一组回答\n<START>\n{{char}}: 第二组独立发言",
         character_book={
             "name": "白塔纪事",
             "entries": [
                 {
                     "name": "白塔法师协会",
                     "keys": ["白塔", "法师协会"],
-                    "content": "白塔是法师协会的总部，{{char}} 曾在这里学习星象。",
+                    "content": "白塔是法师协会的总部，{{char}} 曾在这里学习星象，并认识 {{user}}。",
                     "enabled": True,
                     "extensions": {"untouched": {"preserve": True}},
                 },
@@ -727,11 +728,23 @@ async def test_worldbook_editor_end_to_end_in_browser(web, tmp_path):
             await page.route("http://studio.test/**", route_handler)
             await page.goto("http://studio.test/")
             await page.get_by_role("button", name="编辑角色：爱莉", exact=True).click()
+            await page.locator('.save-actions [data-action="preview"]').click()
+            await page.locator(
+                '#preview:has-text("以 爱莉 的身份与 用户 自然交流")'
+            ).wait_for()
+            preview_prompt = await page.locator("#preview pre").first.inner_text()
+            assert preview_prompt.endswith(
+                "## 示例对话\n\n<START>\n用户: 第一组提问\n爱莉: 第一组回答"
+                "\n\n<START>\n爱莉: 第二组独立发言"
+            )
+            await page.locator('.save-actions [data-action="preview"]').click()
             await page.get_by_role("tab", name="世界书", exact=True).click()
+            assert await page.locator('[data-wb-test="username"]').count() == 0
             await page.locator('[data-wb-test="test"]').fill("今天我们去白塔看看吧。")
             await page.locator(
                 '#wb-result:has-text("爱莉 曾在这里学习星象")'
             ).wait_for()
+            assert "认识 用户" in await page.locator("#wb-result").inner_text()
             assert await page.locator('.wb-result-row:has-text("已注入")').count() == 2
             assert "暂不支持" in await page.locator("#wb-result").inner_text()
             await page.screenshot(

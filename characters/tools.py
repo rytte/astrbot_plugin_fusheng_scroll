@@ -43,7 +43,7 @@ def card_tool_parameters(name):
         },
         "options": {
             "type": "object",
-            "description": "AstrBot 配置：tools/skills 为 null、[] 或名称列表，custom_error_message 为字符串或 null，greeting_index 为非负整数",
+            "description": "AstrBot 配置：tools/skills 为 null、[] 或名称列表，custom_error_message 为字符串或 null；greeting_index 为非负整数，仅用于开场白预览，不参与对话",
         },
         "bind": {
             "type": "boolean",

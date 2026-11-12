@@ -242,12 +242,16 @@ def test_compilation_keeps_metadata_out_and_examples_separate():
     assert "未来引擎内容" not in result["system_prompt"]
     assert result["begin_dialogs"] == []
     assert [len(b) for b in result["examples"]] == [2, 1]
+    assert result["example_prompt"] == (
+        "## 示例对话\n\n<START>\n用户: 你好\n爱莉: 嗨\n\n<START>\n爱莉: 独立示例"
+    )
     assert "{{original}}" not in result["system_prompt"]
     assert len(result["warnings"]) >= 2
     assert not any("未启用世界书" in warning for warning in result["warnings"])
     card["data"]["mes_example"] = "非标准对白"
     result = compile_card(card)
     assert not result["examples"] and "非标准对白" in result["system_prompt"]
+    assert result["example_prompt"] == ""
 
 
 def test_validation_preserves_unknown_fields_but_rejects_bad_shapes():
