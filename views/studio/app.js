@@ -114,11 +114,19 @@ function modal(title, body) { $('#dialog-title').textContent=title; $('#dialog-b
 function closeModal() { $('#dialog').close(); }
 function updateDeleteControl() {
   const button=$('[data-action="delete-confirm"]');
-  if(button)button.disabled=state.busy||!state.current?.deleted||state.current.locked||state.current.sync.core_locked||$('#delete-name')?.value!==state.current.document.data.name;
+  if(button){
+    button.disabled=state.busy||!state.current?.deleted||state.current.locked||state.current.sync.core_locked||$('#delete-name')?.value!==state.current.document.data.name;
+    button.textContent=$('#delete-persona')?.checked?'删除角色卡和人格':'永久删除角色卡';
+  }
+  const help=$('#delete-persona-help');
+  if(help&&!$('#delete-persona').disabled)help.textContent=$('#delete-persona').checked?'将同时删除此人格。若仍被配置、会话、子代理或任务使用，本次删除会被阻止，角色卡与人格均保留。人格备份和聊天记录会保留。':'默认仅删除角色卡，绑定的人格、人格备份和现有对话会保留。';
 }
 function openDeleteDialog() {
   const c=state.current, name=c.document.data.name;
-  modal(`永久删除「${name}」`, `<div class="form"><p>将永久删除这张角色卡及其 <strong>${c.snapshots.length} 个历史快照</strong>，并清理不再使用的图片资源。删除后无法恢复。</p><p class="small muted">${c.persona_id?'绑定的 AstrBot 人格会保留，现有对话不受影响。':'AstrBot 人格和现有对话不受影响。'}你可以先导出当前角色卡留作备份。</p><label class="field" for="delete-name"><span class="field-label">输入角色名称以确认：<strong>${escape(name)}</strong></span><input id="delete-name" autocomplete="off" spellcheck="false" aria-describedby="delete-error"></label><p id="delete-error" class="small error" role="alert" hidden></p></div><div class="dialog-footer"><button data-action="export">导出角色卡</button><button data-action="cancel-delete">取消</button><button data-action="delete-confirm" class="destructive" disabled>永久删除</button></div>`);
+  const canDeletePersona=c.persona_id&&c.persona_id!=='default'&&c.sync.current&&c.sync.same_record;
+  const personaHelp=c.persona_id==='default'?'系统默认人格不能删除，本次仅删除角色卡。':'原绑定人格已不存在或已被同名记录替换，本次仅删除角色卡。';
+  const personaOption=c.persona_id?`<div class="delete-persona-option"><label class="delete-persona-label" for="delete-persona"><input id="delete-persona" type="checkbox" aria-describedby="delete-persona-help" ${canDeletePersona?'':'disabled'}><span><strong>同时删除绑定的 AstrBot 人格</strong><span class="small muted delete-persona-id">${escape(c.persona_id)}</span></span></label><p id="delete-persona-help" class="small muted">${canDeletePersona?'':personaHelp}</p></div>`:'';
+  modal(`永久删除「${name}」`, `<div class="form"><p>将永久删除这张角色卡及其 <strong>${c.snapshots.length} 个历史快照</strong>，并清理不再使用的图片资源。删除后无法恢复。</p>${personaOption}<p class="small muted">${c.persona_id?'':'此卡片未绑定 AstrBot 人格，现有对话不受影响。'}你可以先导出当前角色卡留作备份。</p><label class="field" for="delete-name"><span class="field-label">输入角色名称以确认：<strong>${escape(name)}</strong></span><input id="delete-name" autocomplete="off" spellcheck="false" aria-describedby="delete-error"></label><p id="delete-error" class="small error" role="alert" hidden></p></div><div class="dialog-footer"><button data-action="export">导出角色卡</button><button data-action="cancel-delete">取消</button><button data-action="delete-confirm" class="destructive" disabled>永久删除角色卡</button></div>`);
   updateDeleteControl();
   $('#delete-name').focus();
 }
@@ -498,6 +506,7 @@ document.addEventListener('input',event=>{
 });
 document.addEventListener('change',event=>{
   const el=event.target;
+  if(el.id==='delete-persona'){updateDeleteControl();$('#delete-error').hidden=true;return;}
   if(el.id==='show-keys'){state.showKeys=el.checked;$('#studio').classList.toggle('show-keys',state.showKeys);}
   if(el.dataset.mode){state.options[el.dataset.mode]=el.value==='all'?null:el.value==='none'?[]:[''];renderPanel();updateSavebar();}
 });
@@ -581,9 +590,9 @@ document.addEventListener('click',event=>{
     if($('#delete-name').value!==state.current.document.data.name)return;
     busy(async()=>{
       try {
-        const result=await post('delete',{card_id:state.current.card_id,expected_revision:state.current.revision,confirm_name:$('#delete-name').value});
+        const result=await post('delete',{card_id:state.current.card_id,expected_revision:state.current.revision,confirm_name:$('#delete-name').value,delete_persona:$('#delete-persona')?.checked||false});
         closeModal();state.deleted=true;await showCollection();
-        notice(`角色卡及其历史快照已永久删除，AstrBot 人格与现有对话未受影响。${result.cleanup_pending?'部分图片暂未清理，将自动重试。':''}`);
+        notice(`角色卡及其历史快照已永久删除，${result.persona_deleted?'绑定的 AstrBot 人格也已删除，聊天记录保留。':'AstrBot 人格与现有对话未受影响。'}${result.cleanup_pending?'部分图片暂未清理，将自动重试。':''}`);
       }catch(error){
         const message=$('#delete-error');
         if(!message||!$('#dialog').open)throw error;

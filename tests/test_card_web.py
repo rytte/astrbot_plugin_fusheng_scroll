@@ -181,6 +181,63 @@ async def test_web_archive_unarchive_and_permanent_delete_preserve_core(web):
     )
 
 
+@pytest.mark.parametrize("in_use", [False, True])
+async def test_web_optional_persona_deletion_checks_references_and_preserves_history(
+    web, in_use
+):
+    async def action(name, payload):
+        return await web.client.post(
+            PREFIX + "/action", json={"action": name, "payload": payload}
+        )
+
+    c = (await action("create", {"card": new_card("联动删除")})).json()["data"]
+    c = (
+        await action(
+            "archive", {"card_id": c["card_id"], "expected_revision": c["revision"]}
+        )
+    ).json()["data"]
+    if in_use:
+        web.cards.studio.context.get_config()["provider_settings"][
+            "default_personality"
+        ] = c["persona_id"]
+    payload = {
+        "card_id": c["card_id"],
+        "expected_revision": c["revision"],
+        "confirm_name": "联动删除",
+        "delete_persona": True,
+    }
+    # The option cannot bypass the WebUI authentication guard.
+    web.identity["username"] = ""
+    assert (await action("delete", payload)).status_code == 400
+    web.identity["username"] = "dashboard-admin"
+    response = await action("delete", payload)
+    if in_use:
+        assert response.status_code == 400, response.text
+        error = response.json()
+        assert error["data"]["code"] == "persona_in_use"
+        assert error["data"]["details"]["counts"] == {"config": 1}
+        assert error["data"]["details"]["references"]
+        assert "默认或其他配置" in error["message"]
+        assert await web.cards.studio.current(c["persona_id"]) is not None
+        card = await web.client.get(PREFIX + "/card", params={"card_id": c["card_id"]})
+        assert card.status_code == 200 and card.json()["data"]["snapshots"]
+        payload["delete_persona"] = False
+        assert (await action("delete", payload)).status_code == 200
+        assert await web.cards.studio.current(c["persona_id"]) is not None
+    else:
+        assert response.status_code == 200, response.text
+        result = response.json()["data"]
+        assert result["deleted"] and result["persona_deleted"]
+        assert result["persona_id"] == c["persona_id"]
+        assert await web.cards.studio.current(c["persona_id"]) is None
+        assert (
+            await web.client.get(PREFIX + "/card", params={"card_id": c["card_id"]})
+        ).status_code == 400
+        assert web.cards.studio.storage.get_backup(
+            result["persona_backup_id"], CardStudio.web_actor("dashboard-admin")
+        )
+
+
 async def test_page_list_includes_existing_core_personas_and_keeps_bindings(web):
     await web.cards.studio.manager.create_persona(
         "已有 AstrBot 人格", system_prompt="完整提示词", begin_dialogs=["问题", "回答"]
@@ -372,6 +429,201 @@ async def test_worldbook_preview_unsaved_draft_validation_and_no_side_effects(we
         PREFIX + "/action", json={"action": "worldbook_preview", "payload": payload}
     )
     assert response.status_code == 400
+
+
+async def test_delete_dialog_end_to_end_in_browser(web, tmp_path):
+    import shutil
+    from pathlib import Path
+    from urllib.parse import urlsplit
+
+    async_playwright = pytest.importorskip("playwright.async_api").async_playwright
+    executable = shutil.which("chromium") or shutil.which("google-chrome")
+    if not executable:
+        pytest.skip("No installed Chromium browser for deletion integration test")
+
+    async def action(name, payload):
+        response = await web.client.post(
+            PREFIX + "/action", json={"action": name, "payload": payload}
+        )
+        assert response.status_code == 200, response.text
+        return response.json()["data"]
+
+    samples = {}
+    for name in ("联动删除", "只删卡片", "未绑定", "人格缺失", "同名重建"):
+        c = await action("create", {"card": new_card(name), "bind": name != "未绑定"})
+        samples[name] = await action(
+            "archive", {"card_id": c["card_id"], "expected_revision": c["revision"]}
+        )
+        if name in ("人格缺失", "同名重建"):
+            await web.cards.studio.manager.delete_persona(c["persona_id"])
+        if name == "同名重建":
+            await web.cards.studio.manager.create_persona(
+                c["persona_id"], system_prompt="新记录"
+            )
+    await web.cards.discover_personas(CardStudio.web_actor("dashboard-admin"))
+    default = web.cards.storage.by_persona("default")
+    await action(
+        "archive",
+        {"card_id": default["card_id"], "expected_revision": default["revision"]},
+    )
+    bridge = """
+    window.AstrBotPluginView={
+      ready:async()=>{},onContext:fn=>{window.reviewTheme=dark=>fn({isDark:dark});fn({isDark:false});},
+      request:async(path,method='GET',body)=>{
+        const response=await fetch('/api'+path,{method,headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});
+        const result=await response.json();if(!response.ok)throw Error(result.message||'请求失败');return result.data;
+      },
+      apiGet:(path,params={})=>window.AstrBotPluginView.request('/'+path+'?'+new URLSearchParams(params)),
+      apiPost:(path,body)=>window.AstrBotPluginView.request('/'+path,'POST',body)
+    };
+    """
+    root = Path(__file__).parents[1] / "views" / "studio"
+    errors, deletions = [], []
+    async with async_playwright() as playwright:
+        browser = await playwright.chromium.launch(
+            executable_path=executable, headless=True, args=["--no-sandbox"]
+        )
+        try:
+            page = await browser.new_page(viewport={"width": 1280, "height": 1000})
+            page.on("pageerror", lambda error: errors.append(str(error)))
+
+            async def route_handler(route):
+                request = route.request
+                path = urlsplit(request.url).path
+                if path == "/api/plugin/page/bridge-sdk.js":
+                    await route.fulfill(
+                        body=bridge, content_type="application/javascript"
+                    )
+                elif path.startswith("/api/"):
+                    if path == "/api/action":
+                        body = json.loads(request.post_data)
+                        if body["action"] == "delete":
+                            deletions.append(body["payload"])
+                    response = await web.client.request(
+                        request.method,
+                        PREFIX + request.url.split("/api", 1)[1],
+                        content=request.post_data,
+                        headers={"Content-Type": "application/json"},
+                    )
+                    await route.fulfill(
+                        status=response.status_code,
+                        body=response.content,
+                        content_type="application/json",
+                    )
+                elif path in ("/", "/app.js", "/app.css", "/worldbook.js", "/logo.png"):
+                    file = root / ("index.html" if path == "/" else path[1:])
+                    await route.fulfill(
+                        body=file.read_bytes(),
+                        content_type={
+                            ".html": "text/html",
+                            ".js": "application/javascript",
+                            ".css": "text/css",
+                            ".png": "image/png",
+                        }[file.suffix],
+                    )
+                else:
+                    await route.fulfill(status=404)
+
+            await page.route("http://studio.test/**", route_handler)
+            await page.goto("http://studio.test/")
+            await page.locator('[data-collection="archived"]').click()
+            for name in ("未绑定", "人格缺失", "同名重建", "default"):
+                await page.get_by_role(
+                    "button", name=f"编辑角色：{name}", exact=True
+                ).click()
+                await page.locator('[data-action="delete"]').click()
+                if name == "未绑定":
+                    assert await page.locator("#delete-persona").count() == 0
+                else:
+                    assert await page.locator("#delete-persona").is_disabled()
+                await page.locator("#dialog-close").click()
+                await page.locator('[data-action="back"]').click()
+
+            await page.get_by_role(
+                "button", name="编辑角色：联动删除", exact=True
+            ).click()
+            await page.locator('[data-action="delete"]').click()
+            assert not await page.locator("#delete-persona").is_checked()
+            assert await page.locator('[data-action="delete-confirm"]').is_disabled()
+            assert (
+                samples["联动删除"]["persona_id"]
+                in await page.locator(".delete-persona-id").inner_text()
+            )
+            await page.locator("#delete-name").fill("联动删除")
+            await page.locator("#delete-persona").check()
+            assert (
+                await page.locator('[data-action="delete-confirm"]').inner_text()
+                == "删除角色卡和人格"
+            )
+            for theme, width in (
+                ("light", 1280),
+                ("dark", 1280),
+                ("light", 390),
+                ("dark", 320),
+            ):
+                await page.set_viewport_size({"width": width, "height": 1000})
+                await page.evaluate("dark=>window.reviewTheme(dark)", theme == "dark")
+                assert await page.evaluate(
+                    "document.documentElement.scrollWidth<=innerWidth"
+                )
+                assert await page.locator("#dialog").evaluate(
+                    "el=>el.scrollWidth<=el.clientWidth"
+                )
+                await page.screenshot(
+                    path=str(tmp_path / f"delete-{theme}-{width}.png")
+                )
+            web.cards.studio.context.get_config()["provider_settings"][
+                "default_personality"
+            ] = samples["联动删除"]["persona_id"]
+            await page.locator('[data-action="delete-confirm"]').click()
+            await page.locator('#delete-error:has-text("解除对应引用")').wait_for()
+            assert await page.locator("#dialog").is_visible()
+            assert web.cards.storage.get(samples["联动删除"]["card_id"])
+            assert (
+                await web.cards.studio.current(samples["联动删除"]["persona_id"])
+                is not None
+            )
+            await page.locator("#delete-persona").uncheck()
+            assert await page.locator("#delete-error").is_hidden()
+            assert (
+                "默认仅删除角色卡"
+                in await page.locator("#delete-persona-help").inner_text()
+            )
+            await page.locator('[data-action="cancel-delete"]').click()
+            await page.locator('[data-action="delete"]').click()
+            assert not await page.locator("#delete-persona").is_checked()
+            web.cards.studio.context.get_config()["provider_settings"][
+                "default_personality"
+            ] = "default"
+            await page.locator("#delete-persona").check()
+            await page.locator("#delete-name").fill("联动删除")
+            await page.locator('[data-action="delete-confirm"]').click()
+            await page.locator("#dialog").wait_for(state="hidden")
+            await page.locator('#notice-message:has-text("人格也已删除")').wait_for()
+            assert (
+                await web.cards.studio.current(samples["联动删除"]["persona_id"])
+                is None
+            )
+            assert deletions[-1]["delete_persona"] is True
+
+            await page.get_by_role(
+                "button", name="编辑角色：只删卡片", exact=True
+            ).click()
+            await page.locator('[data-action="delete"]').click()
+            await page.locator("#delete-name").fill("只删卡片")
+            await page.locator('[data-action="delete-confirm"]').click()
+            await page.locator("#dialog").wait_for(state="hidden")
+            await page.locator(
+                '#notice-message:has-text("人格与现有对话未受影响")'
+            ).wait_for()
+            assert (
+                await web.cards.studio.current(samples["只删卡片"]["persona_id"])
+                is not None
+            )
+            assert deletions[-1]["delete_persona"] is False
+            assert not errors, errors
+        finally:
+            await browser.close()
 
 
 async def test_worldbook_editor_end_to_end_in_browser(web, tmp_path):

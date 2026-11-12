@@ -204,6 +204,30 @@ class PersonaStudio:
             ) from exc
         return references
 
+    async def check_delete_references(self, actor, persona_id: str) -> None:
+        references = await self.references(persona_id)
+        if not references:
+            return
+        counts = dict(Counter(item["type"] for item in references))
+        labels = {
+            "config": "默认或其他配置",
+            "subagent": "子代理",
+            "conversation": "历史会话",
+            "session_rule": "强制会话规则",
+            "cron_job": "定时任务",
+        }
+        summary = "、".join(
+            f"{labels.get(kind, kind)} {count} 处" for kind, count in counts.items()
+        )
+        details = {"counts": counts}
+        if actor.admin:
+            details["references"] = references
+        raise StudioError(
+            "persona_in_use",
+            f"人格仍被使用（{summary}），请先在 AstrBot 中解除对应引用，再重试删除；本次未执行删除。",
+            details,
+        )
+
     @staticmethod
     def pagination(payload: dict) -> tuple[int, int]:
         offset, limit = payload.get("offset", 0), payload.get("limit", 20)
@@ -454,16 +478,7 @@ class PersonaStudio:
             validate_content(changes, settings)
             self.validate_capabilities(changes)
         else:
-            references = await self.references(persona_id)
-            if references:
-                details = {"counts": dict(Counter(item["type"] for item in references))}
-                if actor.admin:
-                    details["references"] = references
-                raise StudioError(
-                    "persona_in_use",
-                    "人格仍被使用，请先通过有权限入口解除引用，再重试删除。",
-                    details,
-                )
+            await self.check_delete_references(actor, persona_id)
         actor = identify(event, self.settings())
         record = self.ensure_record(
             persona, self.authorized(actor, persona, write=True)

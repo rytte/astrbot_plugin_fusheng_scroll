@@ -13,6 +13,7 @@ from astrbot_plugin_fusheng_scroll.domain import (
     canonical,
     digest,
     identify,
+    record_ref,
 )
 
 
@@ -43,6 +44,20 @@ async def change(env, card, action="update", **kwargs):
         action,
         {"card_id": card["card_id"], "expected_revision": card["revision"], **kwargs},
         event=env.event,
+    )
+
+
+async def delete_card(env, card, **kwargs):
+    return await env.cards.execute(
+        env.actor,
+        "delete",
+        {
+            "card_id": card["card_id"],
+            "expected_revision": card["revision"],
+            "confirm_name": card["document"]["data"]["name"],
+            "delete_persona": True,
+            **kwargs,
+        },
     )
 
 
@@ -299,7 +314,10 @@ async def test_unarchive_checks_card_quota_and_stale_revision(cards):
     assert cards.cards.storage.get(c["card_id"])["deleted"]
 
 
-async def test_permanent_delete_keeps_core_and_prevents_automatic_reimport(cards):
+@pytest.mark.parametrize("delete_option", [{}, {"delete_persona": False}])
+async def test_permanent_delete_keeps_core_and_prevents_automatic_reimport(
+    cards, delete_option
+):
     c = await create(cards)
     c = await change(cards, c, action="archive")
     core = await cards.studio.current(c["persona_id"])
@@ -307,6 +325,7 @@ async def test_permanent_delete_keeps_core_and_prevents_automatic_reimport(cards
         "card_id": c["card_id"],
         "expected_revision": c["revision"],
         "confirm_name": "爱莉",
+        **delete_option,
     }
     with pytest.raises(StudioError) as exc:
         await cards.cards.execute(cards.actor, "delete", payload, event=cards.event)
@@ -330,7 +349,10 @@ async def test_permanent_delete_keeps_core_and_prevents_automatic_reimport(cards
     )
 
 
-async def test_permanent_delete_checks_archive_name_revision_ownership_and_locks(cards):
+@pytest.mark.parametrize("delete_persona", [False, True])
+async def test_permanent_delete_checks_archive_name_revision_ownership_and_locks(
+    cards, delete_persona
+):
     c = await create(cards)
     actor = cards.actor
 
@@ -342,6 +364,7 @@ async def test_permanent_delete_checks_archive_name_revision_ownership_and_locks
                 "card_id": card["card_id"],
                 "expected_revision": card["revision"],
                 "confirm_name": "爱莉",
+                "delete_persona": delete_persona,
                 **patch,
             },
         )
@@ -389,6 +412,237 @@ async def test_permanent_delete_checks_archive_name_revision_ownership_and_locks
         assert exc.value.code == "persona_locked"
     assert cards.cards.storage.get(c["card_id"])["deleted"]
     assert cards.cards.storage.snapshots(c["card_id"])
+
+
+async def test_permanent_delete_can_remove_bound_persona_and_preserve_backup(cards):
+    c = await change(cards, await create(cards), action="archive")
+    core = await cards.studio.current(c["persona_id"])
+    record = cards.storage.find(c["persona_id"], c["persona_ref"])
+    previous = cards.storage.backup(record, core, "update")
+    conversation = await cards.db.create_conversation(
+        "platform:FriendMessage:unrelated", "other", persona_id=None
+    )
+    result = await delete_card(cards, c)
+    assert result["deleted"] and result["persona_deleted"]
+    assert result["persona_id"] == c["persona_id"]
+    assert await cards.studio.current(c["persona_id"]) is None
+    assert cards.cards.storage.snapshots(c["card_id"]) == []
+    with pytest.raises(StudioError):
+        cards.cards.storage.get(c["card_id"])
+    record = cards.storage.find(c["persona_id"], c["persona_ref"])
+    assert record["deleted"] and record["revision"] == 2
+    _, backup = cards.storage.get_backup(result["persona_backup_id"], cards.actor)
+    assert backup["persona"] == core
+    assert cards.storage.get_backup(previous, cards.actor)
+    assert any(
+        item.cid == conversation.conversation_id
+        for item in await cards.context.conversation_manager.get_conversations()
+    )
+    listed = await cards.cards.execute(CardStudio.web_actor("admin"), "list", {})
+    assert c["persona_id"] not in {item["persona_id"] for item in listed["items"]}
+    audit = [
+        json.loads(row[0])
+        for row in cards.storage.connection.execute("SELECT entry FROM audit")
+    ]
+    assert any(
+        item["action"] == "card.delete_persona" and item["result"] == "success"
+        for item in audit
+    )
+
+
+@pytest.mark.parametrize("value", [None, 0, 1, "true", [], {}])
+async def test_permanent_delete_persona_option_requires_boolean(cards, value):
+    c = await change(cards, await create(cards), action="archive")
+    with pytest.raises(StudioError) as exc:
+        await delete_card(cards, c, delete_persona=value)
+    assert exc.value.code == "invalid_payload"
+    assert cards.cards.storage.get(c["card_id"])["deleted"]
+    assert await cards.studio.current(c["persona_id"]) is not None
+
+
+@pytest.mark.parametrize("state", ["unbound", "missing", "recreated", "default"])
+async def test_linked_delete_requires_original_deletable_persona(cards, state):
+    if state == "default":
+        await cards.cards.discover_personas(CardStudio.web_actor("admin"))
+        c = await cards.cards.detail(cards.cards.storage.by_persona("default"))
+        cards.actor = CardStudio.web_actor("admin")
+        c = await cards.cards.execute(
+            cards.actor,
+            "archive",
+            {"card_id": c["card_id"], "expected_revision": c["revision"]},
+        )
+    else:
+        c = await change(
+            cards, await create(cards, bind=state != "unbound"), action="archive"
+        )
+        if state in ("missing", "recreated"):
+            await cards.manager.delete_persona(c["persona_id"])
+        if state == "recreated":
+            await cards.manager.create_persona(c["persona_id"], system_prompt="新记录")
+    with pytest.raises(StudioError) as exc:
+        await delete_card(cards, c)
+    assert (
+        exc.value.code
+        == {
+            "unbound": "not_bound",
+            "missing": "persona_missing",
+            "recreated": "record_conflict",
+            "default": "system_persona",
+        }[state]
+    )
+    assert cards.cards.storage.get(c["card_id"])["deleted"]
+    assert cards.cards.storage.snapshots(c["card_id"])
+    current = await cards.studio.current(c["persona_id"]) if c["persona_id"] else None
+    if state == "recreated":
+        assert current["system_prompt"] == "新记录"
+    elif state == "default":
+        assert current is not None
+
+
+@pytest.mark.parametrize(
+    "kind", ["config", "subagent", "conversation", "session_rule", "cron_job"]
+)
+async def test_linked_delete_rejects_references_without_removing_either_side(
+    cards, kind
+):
+    c = await change(cards, await create(cards), action="archive")
+    persona_id = c["persona_id"]
+    if kind == "config":
+        cards.core_config["provider_settings"]["default_personality"] = persona_id
+    elif kind == "subagent":
+        cards.core_config["subagent_orchestrator"] = {
+            "agents": [{"name": "helper", "persona_id": f" {persona_id} "}]
+        }
+    elif kind == "conversation":
+        await cards.db.create_conversation(
+            "other:FriendMessage:private", "other", persona_id=persona_id
+        )
+    elif kind == "session_rule":
+        await cards.db.insert_preference_or_update(
+            "umo",
+            "private-session",
+            "session_service_config",
+            {"val": {"persona_id": persona_id}},
+        )
+    else:
+        await cards.db.create_cron_job(
+            job_id="job",
+            name="job",
+            job_type="active_agent",
+            cron_expression="* * * * *",
+            payload={"persona_id": persona_id},
+        )
+    core = await cards.studio.current(persona_id)
+    with pytest.raises(StudioError) as exc:
+        await delete_card(cards, c)
+    assert exc.value.code == "persona_in_use"
+    assert exc.value.details == {"counts": {kind: 1}}
+    assert "解除对应引用" in str(exc.value)
+    assert await cards.studio.current(persona_id) == core
+    assert cards.cards.storage.get(c["card_id"])["revision"] == c["revision"]
+    assert cards.cards.storage.snapshots(c["card_id"])
+    assert (
+        cards.storage.backups(
+            cards.storage.find(persona_id, c["persona_ref"])["chain_id"]
+        )
+        == []
+    )
+    # An in-use persona does not prevent card-only deletion.
+    await delete_card(cards, c, delete_persona=False)
+    assert await cards.studio.current(persona_id) == core
+
+
+async def test_linked_delete_fails_closed_if_reference_scan_fails(cards, monkeypatch):
+    c = await change(cards, await create(cards), action="archive")
+    monkeypatch.setattr(
+        cards.context.conversation_manager,
+        "get_conversations",
+        AsyncMock(side_effect=RuntimeError("offline")),
+    )
+    with pytest.raises(StudioError) as exc:
+        await delete_card(cards, c)
+    assert exc.value.code == "reference_scan_failed"
+    assert cards.cards.storage.get(c["card_id"])
+    assert await cards.studio.current(c["persona_id"]) is not None
+
+
+@pytest.mark.parametrize("changed", ["identity", "core_lock", "card_revision"])
+async def test_linked_delete_rechecks_state_after_reference_scan(
+    cards, monkeypatch, changed
+):
+    c = await change(cards, await create(cards), action="archive")
+
+    async def scan(persona_id):
+        if changed == "identity":
+            await cards.manager.delete_persona(persona_id)
+            await cards.manager.create_persona(persona_id, system_prompt="新记录")
+        elif changed == "core_lock":
+            current = await cards.studio.current(persona_id)
+            record = cards.storage.find(persona_id, record_ref(current))
+            record["locked"] = 1
+            cards.storage.save_record(record)
+        else:
+            cards.cards.storage.set_locked(c["card_id"], False)
+        return []
+
+    monkeypatch.setattr(cards.studio, "references", scan)
+    with pytest.raises(StudioError) as exc:
+        await delete_card(cards, c)
+    assert (
+        exc.value.code
+        == {
+            "identity": "record_conflict",
+            "core_lock": "persona_locked",
+            "card_revision": "revision_conflict",
+        }[changed]
+    )
+    assert cards.cards.storage.get(c["card_id"])
+    assert await cards.studio.current(c["persona_id"]) is not None
+
+
+@pytest.mark.parametrize("after_write", [False, True])
+async def test_linked_delete_keeps_card_if_core_delete_raises(
+    cards, monkeypatch, after_write
+):
+    c = await change(cards, await create(cards), action="archive")
+    original = cards.manager.delete_persona
+
+    async def fail(persona_id):
+        if after_write:
+            await original(persona_id)
+        raise RuntimeError("core failure")
+
+    monkeypatch.setattr(cards.manager, "delete_persona", fail)
+    with pytest.raises(StudioError) as exc:
+        await delete_card(cards, c)
+    assert exc.value.code == "persona_delete_failed"
+    assert cards.cards.storage.get(c["card_id"])
+    assert cards.cards.storage.snapshots(c["card_id"])
+    assert (await cards.studio.current(c["persona_id"]) is None) == after_write
+
+
+@pytest.mark.parametrize("failure", ["card_delete", "metadata"])
+async def test_linked_delete_reports_partial_failure_and_allows_card_only_cleanup(
+    cards, monkeypatch, failure
+):
+    c = await change(cards, await create(cards), action="archive")
+
+    def fail(*args):
+        raise RuntimeError("storage failure")
+
+    with monkeypatch.context() as patch:
+        if failure == "card_delete":
+            patch.setattr(cards.cards.storage, "delete", fail)
+        else:
+            patch.setattr(cards.storage, "save_record", fail)
+        with pytest.raises(StudioError) as exc:
+            await delete_card(cards, c)
+    assert exc.value.code == "partial_failure"
+    assert exc.value.details["persona_deleted"]
+    assert await cards.studio.current(c["persona_id"]) is None
+    assert cards.cards.storage.get(c["card_id"])
+    result = await delete_card(cards, c, delete_persona=False)
+    assert result["deleted"]
 
 
 async def test_maintenance_retries_images_protected_by_unexpired_uploads(cards):

@@ -5,6 +5,7 @@ import copy
 import time
 
 from astrbot.api import logger
+from astrbot.core.persona_mgr import SYSTEM_DEFAULT_PERSONA_ID
 
 from .card_assets import (
     CardAssets,
@@ -72,7 +73,7 @@ CARD_ACTIONS = {
     "archive": ({"card_id", "expected_revision"}, {"card_id", "expected_revision"}),
     "unarchive": ({"card_id", "expected_revision"}, {"card_id", "expected_revision"}),
     "delete": (
-        {"card_id", "expected_revision", "confirm_name"},
+        {"card_id", "expected_revision", "confirm_name", "delete_persona"},
         {"card_id", "expected_revision", "confirm_name"},
     ),
     "snapshots": ({"card_id"}, {"card_id"}),
@@ -550,6 +551,10 @@ class CardStudio:
                 card = self.storage.save(card, card["revision"])
                 await self.sync(actor, card, event=event)
             elif action == "delete":
+                if type(payload.get("delete_persona", False)) is not bool:
+                    raise StudioError(
+                        "invalid_payload", "delete_persona 必须为布尔值。"
+                    )
                 if not card["deleted"]:
                     raise StudioError("not_archived", "请先归档角色卡，再永久删除。")
                 if payload["confirm_name"] != card["document"]["data"]["name"]:
@@ -559,12 +564,27 @@ class CardStudio:
                 await self.ensure_core_writable(actor, card, event)
                 # Image resolution uses this lock before writing the shared cache.
                 async with self.images.lock:
-                    self.storage.delete(actor, card, card["revision"])
+                    persona_result = (
+                        await self.delete_bound_persona(actor, card)
+                        if payload.get("delete_persona", False)
+                        else {}
+                    )
+                    try:
+                        self.storage.delete(actor, card, card["revision"])
+                    except Exception as exc:
+                        if not persona_result:
+                            raise
+                        raise StudioError(
+                            "partial_failure",
+                            "AstrBot 人格已删除，但角色卡清理未完成。请刷新确认状态；若角色卡仍在，可取消勾选“同时删除绑定的 AstrBot 人格”后仅删除角色卡。",
+                            persona_result,
+                        ) from exc
                     pending = self.cleanup_assets_locked()
                 return {
                     "card_id": card["card_id"],
                     "deleted": True,
                     "cleanup_pending": pending,
+                    **persona_result,
                 }
             elif action == "restore":
                 if card["deleted"]:
@@ -661,6 +681,72 @@ class CardStudio:
             self.reauthorize(actor, event)
             if current is not None and record_ref(current) == card["persona_ref"]:
                 self.studio.authorized(actor, current, write=True)
+
+    async def delete_bound_persona(self, actor, card):
+        """Called only by manual card deletion, with studio and image locks held."""
+        persona_id = card["persona_id"]
+        if not persona_id:
+            raise StudioError("not_bound", "角色卡未绑定 AstrBot 人格。")
+        if persona_id == SYSTEM_DEFAULT_PERSONA_ID:
+            raise StudioError(
+                "system_persona", "系统默认人格不能删除，请取消勾选后仅删除角色卡。"
+            )
+
+        async def checked_current():
+            current = await self.studio.current(persona_id)
+            if current is None:
+                raise StudioError(
+                    "persona_missing",
+                    "绑定的 AstrBot 人格已不存在，请刷新后仅删除角色卡。",
+                )
+            if record_ref(current) != card["persona_ref"]:
+                raise StudioError(
+                    "record_conflict",
+                    "同名人格已不是原绑定记录，已阻止联动删除；请刷新后仅删除角色卡。",
+                )
+            self.studio.authorized(actor, current, write=True)
+            return current
+
+        await checked_current()
+        await self.studio.check_delete_references(actor, persona_id)
+        # Reference scanning awaits other services; recheck identity and locks afterwards.
+        current = await checked_current()
+        latest = self.storage.get(card["card_id"])
+        self.authorize(actor, latest, write=True, allow_deleted=True)
+        if latest["revision"] != card["revision"] or not latest["deleted"]:
+            raise StudioError("revision_conflict", "角色卡状态已改变，请刷新后再操作。")
+        record = self.studio.ensure_record(
+            current, self.studio.authorized(actor, current, write=True)
+        )
+        backup_id = self.studio.storage.backup(record, current, "delete")
+        self.studio.storage.audit(actor, "card.delete_persona", persona_id, "pending")
+        try:
+            await self.studio.manager.delete_persona(persona_id)
+        except Exception as exc:
+            raise StudioError(
+                "persona_delete_failed",
+                "AstrBot 人格删除未能完成，角色卡已保留。请刷新检查人格的当前状态后再操作。",
+                {"persona_id": persona_id, "backup_id": backup_id},
+            ) from exc
+        result = {
+            "persona_deleted": True,
+            "persona_id": persona_id,
+            "persona_backup_id": backup_id,
+        }
+        try:
+            record.update(revision=record["revision"] + 1, deleted=1)
+            self.studio.storage.save_record(record)
+            self.studio.prune(record, self.studio.settings())
+            self.studio.storage.audit(
+                actor, "card.delete_persona", persona_id, "success"
+            )
+        except Exception as exc:
+            raise StudioError(
+                "partial_failure",
+                "AstrBot 人格已删除，但人格元数据更新未完成，角色卡已保留。请刷新确认状态后再操作。",
+                result,
+            ) from exc
+        return result
 
     async def sync(
         self, actor, card, *, overwrite=False, expected_core_token=None, event=None
